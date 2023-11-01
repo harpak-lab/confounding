@@ -2158,7 +2158,7 @@ fig_s8_dat  <- bind_rows(pr_ss %>% mutate(data="all pairs"),
   dplyr::select(relationship_rename, n, cov, var0, data) %>%
   mutate(n = ifelse(relationship_rename == "Parent-child", 1, ifelse(relationship_rename == "Grandparent-grandchild", 2, n))) %>%
   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
-    mutate(n_adj = ifelse(relationship_rename == "Parent-child", 0.85, ifelse(relationship_rename == "Full siblings", 1.15, ifelse(relationship_rename == "Siblings once removed", 1.85, ifelse(relationship_rename == "Grandparent-Grandchild", 2.15, n)))))
+    mutate(n_adj = ifelse(relationship_rename == "Parent-child", 0.85, ifelse(relationship_rename == "Full siblings", 1.15, ifelse(relationship_rename == "Siblings once removed", 1.85, ifelse(relationship_rename == "Grandparent-grandchild", 2.15, n)))))
 
 fig_s8a <- fig_s8_dat %>% 
   #pivot_wider(values_from=cov, names_from=gp) %>% 
