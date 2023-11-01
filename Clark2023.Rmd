@@ -26,6 +26,7 @@ library(RColorBrewer)
 
 
 ```{r read data}
+# set data location
 data_loc <- "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/"
 
 #### Reported correlations in Clark (2023) Table 2
@@ -95,7 +96,8 @@ theme_clark <- function() {
       axis.title = element_text(size = 16),
       legend.title = element_text(size = 18),
       strip.text = element_text(size = 16),
-      legend.text = element_text(size = 16)
+      legend.text = element_text(size = 16),
+      strip.background = element_blank()
     )
 }
 ```
@@ -142,7 +144,7 @@ wealth_long <- wealth %>%
 ```
 
 ```{r relationship df}
-# relationship vector
+# relationship vectors for matching names between all data sets
 relationship <- c("Full sibling", "Child", "Sibling-rem", "Grandchild", "Cousin", "Cousin-rem", "Cousin2", "Cousin2-rem", "Cousin3", "Cousin3-rem", "Cousin4")
 
 relationship_rels <- c("Siblings", "Parent-child", "siblings-removed", "Grandchild", "cousin1", "cousin-removed", "cousin2", "cousin2-rem", "cousin3", "cousin3-rem", "cousin4")
@@ -165,6 +167,9 @@ relations.df <- data.frame(relationship = relationship,
 ```
 
 # Check correlations
+
+Make sure the correlations calculated from raw data match those in Clark (2023) Table 2
+
 ```{r}
 
 clark_cors_long.df <- clark_cors %>%
@@ -285,6 +290,8 @@ ggsave("cors.png", width = 12, height = 10, units = "in")
 ```
 
 # Fig 2 - Paternal wealth
+
+Correlations between paternal wealth and status measures; plot occStat ~ paternal wealth; plot cor(occStat) ~ cor(paternal wealth)
 
 ```{r Table S2 correlations}
 
@@ -440,6 +447,8 @@ ggsave("fig_2.png", width = 11, height = 12, units = "in")
 
 
 # Figs 3 / S7 - Pseudoreplication
+
+Demonstrating and correcting for pseudo-replication in the data (where individuals are represented multiple times and treated as independent) 
 
 ```{r downsampling}
 ds_occstat <- data.frame()
@@ -611,15 +620,17 @@ unique_check <- inds_occStat_1780 %>%
   distinct(pid)
 
 
-
+# get list of relationships
 unique_relationships <- unique(inds_occStat_1780$relationship)
 
+# make empty df
 pseudo_df <- data.frame(
   relationship_1 = character(),
   relationship_2 = character(),
   pseudo_index = numeric()
 )
 
+# calculate pseudo-rep statistic for each combination of relationships
 for (i in seq_along(unique_relationships)) {
   for (j in seq_along(unique_relationships)) {
       combo <- inds_occStat_1780 %>% filter(relationship == unique_relationships[i] | relationship == unique_relationships[j])
@@ -878,7 +889,7 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_occ_perc <- do.call(rbind, results_list_occ_perc)
 
-write.csv(results_df_occ_perc, "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/results_df_occ_perc.csv", row.names = F)
+#write.csv(results_df_occ_perc, "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/results_df_occ_perc.csv", row.names = F)
 #results_df_occ_perc <- read.csv(paste0(data_loc, "results_df_occ_perc.csv"))
 
 ####
@@ -2171,7 +2182,7 @@ fig_s8a <- fig_s8_dat %>%
   geom_text(data=fig_s8_dat %>%
                      group_by(n_adj) %>%
                      filter(cov == max(cov)),
-                   aes(y = cov + 5, label=relationship_rename),
+                   aes(y = cov + 10, label=relationship_rename),
                    colour="black",
                    angle = 90,
                     vjust = 0.3,
@@ -2185,16 +2196,16 @@ fig_s8a <- fig_s8_dat %>%
   #                 colour="black", min.segment.length=5, nudge_y=5)+
   # scale_x_continuous(limits=c(30, 160))+
   coord_cartesian(clip = "off") +
-  #scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
   geom_brace(aes(c(0.8, 1.2), c(2, 10)), inherit.data = F, rotate = 180) +
   geom_brace(aes(c(1.8, 2.2), c(2, 10)), inherit.data = F, rotate = 180) +
   scale_x_continuous(breaks=1:9) +
   scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
   # single legend for color and shape
   xlab("Degree of relatedness (n)") +
-  annotate("text", x = 1, y = 50, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
-  annotate("text", x = 6, y = 125, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
-  xlab("Degree of relationship (n)")+
+  annotate("text", x = 3, y = 25, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
+  annotate("text", x = 1, y = 90, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
+  xlab("")+
   ylab("Covariance")+
   theme(legend.position="none",
         panel.grid = element_blank(),
@@ -2202,7 +2213,9 @@ fig_s8a <- fig_s8_dat %>%
       axis.title = element_text(size = 16),
       legend.title = element_text(size = 18),
       strip.text = element_text(size = 16),
-      legend.text = element_text(size = 16))
+      legend.text = element_text(size = 16),
+      axis.title.x = element_blank(),
+      plot.margin = margin(1.2, 0.1, 0, 0.1, "in"))
 
 fig_s8b <- fig_s8_dat %>% 
   #pivot_wider(values_from=cov, names_from=gp) %>% 
@@ -2210,47 +2223,64 @@ fig_s8b <- fig_s8_dat %>%
   geom_point(size=3)+
   geom_line(linetype="dashed", colour="black")+
   # geom_abline(alpha=0.5)+
-  theme_clark()+
-  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n<=4 | n==6)),
-                  aes(label=relationship_rename),
-                  colour="black", min.segment.length=5, nudge_y=-1, nudge_x=0.5)+
-  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n==5 | n>6)),
-                  aes(label=relationship_rename),
-                  colour="black", min.segment.length=5, nudge_y=5)+
+  theme_classic()+
+  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n<=4 | n==6)),
+  #                 aes(label=relationship_rename),
+  #                 colour="black", min.segment.length=5, nudge_y=-1, nudge_x=0.5)+
+  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n==5 | n>6)),
+  #                 aes(label=relationship_rename),
+  #                 colour="black", min.segment.length=5, nudge_y=5)+
   # scale_x_continuous(limits=c(30, 160))+
   geom_brace(aes(c(0.8, 1.2), c(200, 205)), inherit.data = F, rotate = 180) +
   geom_brace(aes(c(1.8, 2.2), c(200, 205)), inherit.data = F, rotate = 180) +
   scale_x_continuous(breaks=1:9) +
-  scale_y_continuous(limits=c(200, 310)) +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
+  #scale_y_continuous(limits=c(200, 310)) +
   scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
   # single legend for color and shape
   xlab("Degree of relatedness (n)") +
-  annotate("text", x = 0.5, y = 305, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
-  annotate("text", x = 2.5, y = 225, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
+#  annotate("text", x = 0.5, y = 305, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
+#  annotate("text", x = 2.5, y = 225, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
   xlab("Degree of relationship (n)")+
   ylab("Variance")+
-  theme(legend.position="none")
+  theme(legend.position="none",
+        panel.grid = element_blank(),
+      axis.text = element_text(size = 14),
+      axis.title = element_text(size = 16),
+      legend.title = element_text(size = 18),
+      strip.text = element_text(size = 16),
+      legend.text = element_text(size = 16),
+      plot.margin = margin(0, 0.1, 0, 0.1, "in"))
+
+
+plot_grid(fig_s8a, fig_s8b, nrow = 2, labels = c("(a)", "(b)"), label_y = c(0.8, 1), label_size = 18, rel_heights = c(1, 0.8))
+
+ggsave("fig_s8.png", width = 7, height = 10, units = "in")
 
 ```
 
 # Fig S9
 
 ```{r}
+rel_corrs <- rels_occ %>%
+  left_join(wealth_long  %>% dplyr::select(pid, lwealth), by = join_by(pid0 == pid)) %>%
+  left_join(wealth_long  %>% dplyr::select(pid, lwealth), by = join_by(pid1 == pid), suffix = c("_0", "_1")) %>%
+  {.}
 
-occ_dist_raw <- bind_rows(rels_occ %>%
+occ_dist_raw <- bind_rows(rel_corrs %>%
                             dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
                             dplyr::select(relationship, pid=pid0, occ=occ0, wealth=lwealth_0, byr=byr0),
-                          rels_occ %>%
+                          rel_corrs %>%
                             dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
                             dplyr::select(relationship, pid=pid1, occ=occ1, wealth=lwealth_1, byr=byr1)) %>%
   group_by(relationship, pid) %>% 
   slice_sample(n=1) %>%
   mutate(group="Unique individuals")
 
-occ_dist_pr <- bind_rows(rels_occ %>%
+occ_dist_pr <- bind_rows(rel_corrs %>%
                            dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
                            dplyr::select(relationship, pid=pid0, occ=occ0, wealth=lwealth_0, byr=byr0),
-                         rels_occ %>%
+                         rel_corrs %>%
                            dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
                            dplyr::select(relationship, pid=pid1, occ=occ1, wealth=lwealth_1, byr=byr1)) %>%
   mutate(group="All pairs")
@@ -2261,6 +2291,7 @@ fig_s9_ab <- bind_rows(occ_dist_raw, occ_dist_pr) %>%
   mutate(group=factor(group, levels=c("Unique individuals", "All pairs"))) %>% 
   dplyr::filter(relationship %in% c("father-son", "cousin", "cousin2", "cousin3", "cousin4")) %>%
   merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>% 
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
   ggplot(aes(x=occ, colour=relationship_rename))+
   geom_density()+
   theme_clark()+
@@ -2276,16 +2307,25 @@ fig_s9_cd <- bind_rows(occ_dist_raw, occ_dist_pr) %>%
   mutate(group=factor(group, levels=c("Unique individuals", "All pairs"))) %>% 
   dplyr::filter(relationship %in% c("father-son", "cousin4")) %>%
   merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>% 
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
   ggplot(aes(x=occ, colour=relationship_rename))+
   geom_density(aes(linetype=group), size=1)+
   theme_clark()+
   xlab("Occupational status")+
   theme(legend.title=element_blank(), 
         legend.text=element_text(size=12), 
-        legend.position=c(0.8, 0.8))+
+        legend.position=c(0.77, 0.9))+
   guides(colour=F)+
   facet_wrap(~relationship_rename, ncol=1)+
   scale_colour_manual(values=brewer.pal(11, "RdYlBu")[c(1,11)])
+
+ggdraw(plot_grid(fig_s9_ab, fig_s9_cd, nrow = 1)) +
+  draw_label("(a)", x = 0.1, y = 0.88) +
+  draw_label("(b)", x = 0.1, y = 0.43) +
+  draw_label("(c)", x = 0.6, y = 0.88) +
+  draw_label("(d)", x = 0.6, y = 0.43)
+
+ggsave("fig_s9.png", width = 10, height = 5, units = "in")
 
 ```
 
@@ -2299,6 +2339,7 @@ rel_corrs <- rels_occ %>%
   left_join(wealth_long  %>% dplyr::select(pid, lwealth), by = join_by(pid0 == pid)) %>%
   left_join(wealth_long  %>% dplyr::select(pid, lwealth), by = join_by(pid1 == pid), suffix = c("_0", "_1")) %>%
   {.}
+
 
 occstat_confounders <- bind_rows(rel_corrs %>%
                                    dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
@@ -2319,6 +2360,7 @@ occstat_confounders <- bind_rows(rel_corrs %>%
 
 fig_s10 <- occstat_confounders %>% 
   merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>%
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
   pivot_longer(mean_occstat:var_wealth) %>% 
   mutate(name=case_match(name, 
                          "mean_occstat" ~ "Occupational status (mean)", 
@@ -2342,6 +2384,13 @@ fig_s10 <- occstat_confounders %>%
         axis.title.y=element_blank(), 
         legend.position="none")+
   {}
+
+ggdraw(fig_s10) +
+  draw_label("(a)", x = 0.04, y = 0.96) +
+  draw_label("(b)", x = 0.04, y = 0.7) +
+  draw_label("(c)", x = 0.04, y = 0.45) 
+
+ggsave("fig_S10.png", width = 8, height = 8, units = "in")
 
 ```
 
