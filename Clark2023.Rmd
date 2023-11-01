@@ -2264,39 +2264,63 @@ no_pr_ss <- rels_occ %>%
 fig_s8_dat  <- bind_rows(pr_ss %>% mutate(data="all pairs"), 
                          no_pr_ss %>% mutate(data="unique individuals")) %>%
   merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>% 
-  dplyr::select(relationship_rename, n, cov, var0, data)
+  dplyr::select(relationship_rename, n, cov, var0, data) %>%
+  mutate(n = ifelse(relationship_rename == "Parent-child", 1, ifelse(relationship_rename == "Grandparent-grandchild", 2, n))) %>%
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
+    mutate(n_adj = ifelse(relationship_rename == "Parent-child", 0.85, ifelse(relationship_rename == "Full siblings", 1.15, ifelse(relationship_rename == "Siblings once removed", 1.85, ifelse(relationship_rename == "Grandparent-Grandchild", 2.15, n)))))
 
 fig_s8a <- fig_s8_dat %>% 
   #pivot_wider(values_from=cov, names_from=gp) %>% 
-  ggplot(aes(x=n, y=cov, colour=data, group=relationship_rename))+
+  ggplot(aes(x=n_adj, y=cov, colour=data, group=relationship_rename))+
   geom_point(size=3)+
   geom_line(linetype="dashed", colour="black")+
   # geom_abline(alpha=0.5)+
   theme_clark()+
-  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals"),
+  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n<=3),
                   aes(label=relationship_rename),
-                  colour="black",
-                  nudge_x=2, nudge_y=5)+
+                  colour="black", min.segment.length=5, nudge_y=-5)+
+  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n>3),
+                  aes(label=relationship_rename),
+                  colour="black", min.segment.length=5, nudge_y=5)+
   # scale_x_continuous(limits=c(30, 160))+
+  geom_brace(aes(c(0.8, 1.2), c(200, 10)), inherit.data = F, rotate = 180) +
+  geom_brace(aes(c(1.8, 2.2), c(200, 10)), inherit.data = F, rotate = 180) +
+  scale_x_continuous(breaks=1:9) +
+  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
+  # single legend for color and shape
+  xlab("Degree of relatedness (n)") +
+  annotate("text", x = 1, y = 50, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
+  annotate("text", x = 6, y = 125, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
   xlab("Degree of relationship (n)")+
   ylab("Covariance")+
-  theme(legend.position=c(0.2,0.2))
+  theme(legend.position="none")
 
 fig_s8b <- fig_s8_dat %>% 
   #pivot_wider(values_from=cov, names_from=gp) %>% 
-  ggplot(aes(x=n, y=var0, colour=data, group=relationship_rename))+
+  ggplot(aes(x=n_adj, y=var0, colour=data, group=relationship_rename))+
   geom_point(size=3)+
   geom_line(linetype="dashed", colour="black")+
   # geom_abline(alpha=0.5)+
   theme_clark()+
-  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals"),
+  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n<=4 | n==6)),
                   aes(label=relationship_rename),
-                  colour="black",
-                  nudge_x=1, nudge_y=-3)+
+                  colour="black", min.segment.length=5, nudge_y=-1, nudge_x=0.5)+
+  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n==5 | n>6)),
+                  aes(label=relationship_rename),
+                  colour="black", min.segment.length=5, nudge_y=5)+
   # scale_x_continuous(limits=c(30, 160))+
+  geom_brace(aes(c(0.8, 1.2), c(200, 205)), inherit.data = F, rotate = 180) +
+  geom_brace(aes(c(1.8, 2.2), c(200, 205)), inherit.data = F, rotate = 180) +
+  scale_x_continuous(breaks=1:9) +
+  scale_y_continuous(limits=c(200, 310)) +
+  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
+  # single legend for color and shape
+  xlab("Degree of relatedness (n)") +
+  annotate("text", x = 0.5, y = 305, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
+  annotate("text", x = 2.5, y = 225, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
   xlab("Degree of relationship (n)")+
   ylab("Variance")+
-  theme(legend.position=c(0.2,0.1))
+  theme(legend.position="none")
 
 ```
 
