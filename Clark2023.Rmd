@@ -14,27 +14,21 @@ library(ggrepel)
 library(ggExtra)
 library(mgcv)
 library(broom)
-#library(visreg)
-#library(car)
-#library(VennDiagram)
-#devtools::install_github("gaospecial/ggVennDiagram")
-#library(ggVennDiagram)
-#library(ggvenn)
 library(cowplot)
 library(stringr)
 library(scales)
 library(performance)
 library(Hmisc)
-#library(lme4)
 library(stringr)
 library(ggbrace)
+library(RColorBrewer)
 ```
 
 
 ```{r read data}
 data_loc <- "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/"
 
-#### Reported correlations in Table 2
+#### Reported correlations in Clark (2023) Table 2
 clark_cors <- read.csv(paste0(data_loc, "clark_reportedCors.csv"))
 
 
@@ -68,7 +62,7 @@ rels <- read.csv(paste0(data_loc, "clark_rels.csv"))
 # from dataset 2, tab "Table 2 Occ Stat 1780-1919"
 rels_occ_orig <- read.csv(paste0(data_loc, "clark_rels_occ.csv"))
 
-#### Fix these data using updated data from Clark
+#### Fix these occStat data using updated data from Clark
 rels_occ_c2 <- read.csv(paste0(data_loc, "rels_occ_cousin2.csv")) %>%
   rename(relationship = Relationship)
 
@@ -171,7 +165,7 @@ relations.df <- data.frame(relationship = relationship,
 ```
 
 # Check correlations
-```{r check correlations}
+```{r}
 
 clark_cors_long.df <- clark_cors %>%
   pivot_longer(modstat:lit, names_to = "measure", values_to = "cor") %>%
@@ -292,7 +286,7 @@ ggsave("cors.png", width = 12, height = 10, units = "in")
 
 # Fig 2 - Paternal wealth
 
-```{r correlations}
+```{r Table S2 correlations}
 
 inds_wealth <- inds %>%
   mutate(pid_fath = as.numeric(pid_fath)) %>%
@@ -336,7 +330,7 @@ cor.test(inds_wealth$occ_fath, inds_wealth$wealth_fath)
 
 ```
 
-```{r status ~ wealth}
+```{r ind status ~ pat wealth}
 inds_wealth_complete <- inds_wealth %>%
   filter(!is.na(occ_fath) & !is.na(wealth_fath) & !is.na(occ))
 
@@ -395,33 +389,6 @@ rels_occ_fam_wealth <- rels_occ %>%
 
 
 
-# rels_occ_fam_wealth_long <- rels_occ_fam_wealth %>%
-#   dplyr::select(pid0, pid1, occ0, occ1, pid0_father_wealth, pid1_father_wealth) %>%
-#   rename(fatherWealth_0 = pid0_father_wealth,
-#          fatherWealth_1 = pid1_father_wealth,
-#          pid_0 = pid0,
-#          pid_1 = pid1,
-#          occ_0 = occ0,
-#          occ_1 = occ1) %>%
-#   pivot_longer(cols = everything(),
-#                names_to = c(".value", "group"),
-#                names_pattern = "(.*)_(\\d)$") %>%
-#   # Filter out duplicates
-#   distinct(pid, .keep_all = TRUE)
-# 
-# 
-# wealth.lm <- lm(occ ~ fatherWealth, data = rels_occ_fam_wealth_long)
-# 
-# summary(wealth.lm)
-# 
-# occ0_p <- predict(wealth.lm, newdata = rels_occ_fam_wealth %>% rename(fatherWealth = pid0_father_wealth))
-# 
-# occ1_p <- predict(wealth.lm, newdata = rels_occ_fam_wealth %>% rename(fatherWealth = pid1_father_wealth))
-
-# predict_occ.df <- rels_occ_fam_wealth %>%
-#   mutate(occ0_p = occ0_p,
-#          occ1_p = occ1_p)
-
 predict_occ_sum.df <- rels_occ_fam_wealth %>%
   group_by(relationship) %>%
   mutate(relationship = tolower(relationship)) %>%
@@ -440,14 +407,6 @@ predict.df <- relations.df %>%
   mutate(shared_genotype = ifelse(relationship == "grandchild", ((1 + m1) / 2) ^ 2, ifelse(relationship == "child", ((1 + m1) / 2) ^ 1, ((1 + m1) / 2) ^ n))) %>% 
   arrange(desc(cor_father_wealth))
 
-
-
-
-
-
-####
-## Including full-sib
-####
 
 
 ## how many unique individuals captured here?
@@ -484,6 +443,8 @@ ggsave("fig_2.png", width = 11, height = 12, units = "in")
 
 ```{r downsampling}
 ds_occstat <- data.frame()
+
+set.seed(124)
 
 for(i in 1:1000){
   
@@ -532,10 +493,6 @@ line.df <- corrected_vs_uncorrected_cors %>%
   group_by(name, n) %>%
   summarise(mean_value = mean(value))
 
-# brackets for n = 1 and 2
-# label_function <- function(x) {
-#   ifelse(x == 1 | x == 2, paste0("[", x, "]"), as.character(x))
-# }
 
 # for labels
 hjust_adjustment <- 0.05
@@ -783,7 +740,7 @@ ggsave("pseudo.png", width = 7, height = 6, units = "in")
 ```
 
 
-### Plot
+### Plot S7
 
 ```{r}
 plot_grid(inds_v_pairs.gg, heatmap.gg, nrow = 2, labels = c("(a)", "(b)"))
@@ -829,7 +786,7 @@ for(i in seq_len(n_iter)) {
     group_by(relationship, byr1_bin, nid) %>%
     slice_sample(n = 1) %>%
     group_by(relationship, byr1_bin) %>%
-    filter(n() > 10) %>%
+    filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
     do(tidy(cor.test(.$occ0, .$occ1, method = "pearson"))) %>%
     dplyr::select(relationship, byr1_bin, estimate, conf.low, conf.high)
   
@@ -846,8 +803,8 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_occ <- do.call(rbind, results_list_occ)
 
-write.csv(results_df_occ, "results_df_occ.csv", row.names = F)
-
+#write.csv(results_df_occ, "results_df_occ.csv", row.names = F)
+#results_df_occ <- read.csv(paste0(data_loc, "results_df_occ.csv"))
 
 ####
 ## Plot
@@ -902,7 +859,7 @@ for(i in seq_len(n_iter)) {
     group_by(byr1_bin, nid) %>%
     slice_sample(n = 1) %>%
     group_by(byr1_bin) %>%
-    filter(n() > 10) %>%
+    filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
     mutate(occ0_rank = calc_percentile_rank(occ0),
            occ1_rank = calc_percentile_rank(occ1)) %>%
     do(tidy(cor.test(.$occ0_rank, .$occ1_rank, method = "pearson"))) %>%
@@ -921,8 +878,8 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_occ_perc <- do.call(rbind, results_list_occ_perc)
 
-write.csv(results_df_occ_perc, "results_df_occ_perc.csv", row.names = F)
-
+write.csv(results_df_occ_perc, "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/results_df_occ_perc.csv", row.names = F)
+#results_df_occ_perc <- read.csv(paste0(data_loc, "results_df_occ_perc.csv"))
 
 ####
 ## Plot
@@ -975,7 +932,7 @@ for(i in seq_len(n_iter)) {
     group_by(relationship, byr1_bin, nid) %>%
     slice_sample(n = 1) %>%
     group_by(relationship, byr1_bin) %>%
-    filter(n() > 10) %>%
+    filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
     do(tidy(cor.test(.$ded0, .$ded1, method = "pearson"))) %>%
     dplyr::select(relationship, byr1_bin, estimate, conf.low, conf.high)
   
@@ -992,8 +949,8 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_ded <- do.call(rbind, results_list_ded)
 
-write.csv(results_df_ded, "results_df_ded.csv", row.names = F)
-
+#write.csv(results_df_ded, "results_df_ded.csv", row.names = F)
+#results_df_ded <- read.csv(paste0(data_loc, "results_df_ded.csv"))
 
 
 ####
@@ -1048,7 +1005,7 @@ for(i in seq_len(n_iter)) {
     group_by(Relationship, byr1_bin, nid) %>%
     slice_sample(n = 1) %>%
     group_by(Relationship, byr1_bin) %>%
-    filter(n() > 10) %>%
+    filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
     do(tidy(cor.test(.$lit0, .$lit1, method = "pearson"))) %>%
     dplyr::select(Relationship, byr1_bin, estimate, conf.low, conf.high)
   
@@ -1065,8 +1022,8 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_lit <- do.call(rbind, results_list_lit)
 
-write.csv(results_df_lit, "results_df_lit.csv", row.names = F)
-
+#write.csv(results_df_lit, "results_df_lit.csv", row.names = F)
+#results_df_lit <- read.csv(paste0(data_loc, "results_df_lit.csv"))
 
 
 ####
@@ -1129,6 +1086,7 @@ ggplot(aes(x = byr1_bin, y = mean_value, ymin = lower_95, ymax = upper_95, color
   labs(x = "Birth Period",
        y = "Correlation",
        color = "") +
+  scale_colour_manual(values=brewer.pal(11, "RdYlBu")) +
   theme_clark() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         legend.position = "bottom") +
@@ -1137,17 +1095,7 @@ ggplot(aes(x = byr1_bin, y = mean_value, ymin = lower_95, ymax = upper_95, color
 
 #ggsave("mobility_allPairs.png", height = 10, width = 8, units = "in")
 
-# mobility_all.df %>%
-#   filter(measure == "Literacy") %>%
-#   mutate(byr1_bin = fct_relevel(byr1_bin, c("1720-1740", "1740-1760", "1760-1780", "1780-1800", "1800-1820", "1820-1840", "1840-1860", "1860-1880"))) %>%
-# ggplot(aes(x = byr1_bin, y = mean_value, ymin = lower_95, ymax = upper_95, color = relationship_rename, group = relationship_rename)) +
-#   geom_pointrange(position = position_dodge(width = 0.2)) +
-#   geom_line(position = position_dodge(width = 0.2)) +
-#   labs(x = "Birth Period",
-#        y = "Correlation",
-#        color = "") +
-#   theme_clark() +
-#   theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
 
 
 ```
@@ -1164,65 +1112,9 @@ rels_occ_binned <- rels_occ %>%
                       include.lowest = TRUE,
                       right = TRUE)) %>%
   group_by(relationship, byr1_bin) %>%
-  filter(n() > 10) %>%
+  filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
   do(tidy(cor.test(.$occ0, .$occ1, method = "pearson"))) %>%
   dplyr::select(relationship, byr1_bin, estimate, conf.low, conf.high)
-
-
-
-
-
-
-
-#################################
-### Percentile rank
-#################################
-
-# Function to calculate percentile ranks
-calc_percentile_rank <- function(vec) {
-  rank(vec) / (length(vec) + 1) * 100
-}
-
-rels_occ_father_son_binned_perc <- rels_occ_father_son %>%
-  mutate(byr1_bin = cut(byr1, breaks = seq(1780, 1920, by = 20),
-                        labels = paste0(seq(1780, 1920 - 20, by = 20), "-", seq(1800, 1920, by = 20)),
-                        include.lowest = TRUE)) %>%
-  group_by(byr1_bin) %>%
-  do({
-    data <- .
-    
-    # Calculate percentile ranks
-    data$occ0_rank <- calc_percentile_rank(data$occ0)
-    data$occ1_rank <- calc_percentile_rank(data$occ1)
-    
-    # Correlation for original values
-    orig_cor <- tidy(cor.test(data$occ0, data$occ1, method = "pearson"))
-    
-    # Correlation for percentile ranks
-    rank_cor <- tidy(cor.test(data$occ0_rank, data$occ1_rank, method = "pearson"))
-    
-    data.frame(relationship = unique(data$relationship),
-               byr1_bin = unique(data$byr1_bin),
-               type = c("original", "percentile_rank"),
-               estimate = c(orig_cor$estimate, rank_cor$estimate),
-               conf.low = c(orig_cor$conf.low, rank_cor$conf.low),
-               conf.high = c(orig_cor$conf.high, rank_cor$conf.high))
-  }) %>%
-  dplyr::select(relationship, byr1_bin, type, estimate, conf.low, conf.high)
-
-rels_occ_father_son_binned_perc %>%
-  filter(type == "percentile_rank") %>%
-ggplot() +
-  geom_pointrange(aes(x = byr1_bin, y = estimate, ymin = conf.low, ymax = conf.high)) +
-  #geom_bar(stat = "identity") +
-  labs(x = "Son birth year",
-       y = "Father-son correlation\nin occupational status") +
-  #annotate("text", x = 5, y = 0.65, label = "italic('Occupational status')", size = 8, parse = TRUE) +
-  theme_clark() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        panel.grid = element_blank())
-
-ggsave("perc_rank.png")
 ```
 
 ```{r ded}
@@ -1235,7 +1127,7 @@ rels_ded_binned <- rels_ded %>%
                       include.lowest = TRUE,
                       right = TRUE)) %>%
   group_by(relationship, byr1_bin) %>%
-  filter(n() > 10) %>%
+  filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
   do(tidy(cor.test(.$ded0, .$ded1, method = "pearson"))) %>%
   select(relationship, byr1_bin, estimate, conf.low, conf.high) %>%
   mutate(trait = "Higher education") %>%
@@ -1245,10 +1137,6 @@ rels_ded_binned <- rels_ded %>%
 ```
 
 ```{r lit}
-
-#################################
-### Correlations 
-#################################
 # Divide byr1 into 20-year bins
 rels_lit_binned_cors <- rels_lit %>%
   filter(!is.na(byr1)) %>%
@@ -1257,7 +1145,7 @@ rels_lit_binned_cors <- rels_lit %>%
                         include.lowest = TRUE,
                         right = T)) %>%
   group_by(Relationship, byr1_bin) %>%
-  filter(n() > 10) %>%
+  filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
   do(tidy(cor.test(.$lit0, .$lit1, method = "pearson"))) %>%
   dplyr::select(Relationship, byr1_bin, estimate, conf.low, conf.high) %>%
   mutate(trait = "Literacy") %>%
@@ -1593,7 +1481,8 @@ fig_s2a_dat <- rels_occ %>%
                 group=correlation_type) %>%
   bind_rows(occstat_1780 %>% 
               mutate(group="Lineage-agnostic \ncorrelation") %>%
-              dplyr::select(relationship_rename, cor, group))
+              dplyr::select(relationship_rename, cor, group)) %>%
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec))
 
 # fig_s2a_dat <- read.csv(paste0(data_loc, "fig3s_dat.csv")) %>%
 #   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec))
@@ -1984,14 +1873,16 @@ ggplot(rels_lineage_all, aes(x = value)) +
   labs(x = "Correlation", y = "") +
   scale_x_continuous(breaks = c(-1, 0, 1)) +
   scale_y_continuous(breaks = c(0, 50)) +
+  coord_cartesian(clip = "off") +
   facet_grid(relationship_rename~name) +
   theme_clark() +
-  theme(strip.text.x = element_text(size = 12),
-        strip.text.y = element_text(angle = 0, hjust = 0),
+  theme(strip.text.x = element_text(size = 14, angle = 45),
+        strip.text.y = element_text(size = 12, angle = 0, hjust = 0),
+        strip.background = element_blank(),
         axis.text = element_text(size = 16),
         axis.title = element_text(size = 18))
 
-ggsave("fig_s3.png", height = 12, width = 22, units = "in")
+ggsave("fig_s3.png", height = 12, width = 18, units = "in")
   
 ```
 
@@ -2218,7 +2109,7 @@ ggsave("fig_s5.png", width = 11, height = 10, units = "in")
 
 # Fig S6
 
-```{r Fig. S6}
+```{r}
 cor_by_pidf <- rels_occ %>%
     dplyr::filter(per1780==1 & relationship !="random") %>%
     group_by(relationship, pidf) %>%
@@ -2240,7 +2131,7 @@ fig_s6 <- cor_by_pidf %>%
 
 # Fig S8
 
-```{r Fig S8}
+```{r}
 # variance and covariance including replicated records
 pr_ss <- rels_occ %>%
     dplyr::filter(per1780==1 & relationship!="random") %>% 
@@ -2302,7 +2193,7 @@ fig_s8b <- fig_s8_dat %>%
 
 # Fig S9
 
-```{r Fig S9}
+```{r}
 
 occ_dist_raw <- bind_rows(rels_occ %>%
                             dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
@@ -2358,7 +2249,7 @@ fig_s9_cd <- bind_rows(occ_dist_raw, occ_dist_pr) %>%
 
 # Fig S10
 
-```{r Fig. S10}
+```{r}
 
 # add wealth data to the relative correlations df
 # annotate with individual wealth of pid0 and pid1
@@ -2501,7 +2392,7 @@ for (i in 1:num_sims) {
     if (cor_values[9] < cor_values[1]) break
   }
   
-  # Use the linear model to generate cor[2:8] values
+  # Use the linear model to generate cor[2:8] values, with slope determined by full-sib and 4th cousin correlations
   n_values <- 2:8
   predicted_log_cor <- (log(cor_values[1]) - log(cor_values[9]))/(1-9) * (n_values-1) + log(cor_values[1])
   cor_values[2:8] <- exp(predicted_log_cor + rnorm(7, mean = 0, sd = noise))
@@ -2573,8 +2464,6 @@ ggplot(aes(x = n, y = cor, group = as.factor(sim))) +
 #### b threshold
 b1.gg <- ggplot(df, aes(x = n_9, y = b)) +
   geom_point() +
-#  geom_vline(aes(xintercept = 0.06),color = "red", size = 2) +
-#  annotate("text", x = 0.082, y = 0.6, label = "Mean correlation\ndue to inflation", color = "red", size = 5) +
   labs(x = "Correlation of 4th cousins",
        y = "Persistence rate (b)") +
   theme_clark() +
@@ -2592,6 +2481,7 @@ sens.gg <- ggplot(df_long, aes(x = cor, y = b)) +
        y = "Persistence rate (b)") +
   scale_x_continuous(breaks = seq(0,1, by = 0.1)) +
   #geom_hline(yintercept = 0.75, linetype = "dashed", color = "red") +
+  scale_colour_manual(values=brewer.pal(11, "RdYlBu")) +
   theme_clark() +
   theme(legend.title = element_blank(),
         legend.position = c(0.5, 0.2),
