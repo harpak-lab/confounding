@@ -2141,6 +2141,7 @@ pr_ss <- rels_occ %>%
             var1=var(occ1, na.rm=T))
 
 # variance and covariance including only unique records
+set.seed(121)
 no_pr_ss <- rels_occ %>%
     dplyr::filter(per1780==1 & relationship!="random") %>% 
   group_by(relationship, pid0) %>% 
@@ -2166,16 +2167,27 @@ fig_s8a <- fig_s8_dat %>%
   geom_point(size=3)+
   geom_line(linetype="dashed", colour="black")+
   # geom_abline(alpha=0.5)+
-  theme_clark()+
-  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n<=3),
-                  aes(label=relationship_rename),
-                  colour="black", min.segment.length=5, nudge_y=-5)+
-  geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n>3),
-                  aes(label=relationship_rename),
-                  colour="black", min.segment.length=5, nudge_y=5)+
+  theme_classic()+
+  geom_text(data=fig_s8_dat %>%
+                     group_by(n_adj) %>%
+                     filter(cov == max(cov)),
+                   aes(y = cov + 5, label=relationship_rename),
+                   colour="black",
+                   angle = 90,
+                    vjust = 0.3,
+            hjust = 0,
+            lineheight = 0.8)+
+  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n<=3),
+  #                 aes(label=relationship_rename),
+  #                 colour="black", min.segment.length=5, nudge_y=-5)+
+  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n>3),
+  #                 aes(label=relationship_rename),
+  #                 colour="black", min.segment.length=5, nudge_y=5)+
   # scale_x_continuous(limits=c(30, 160))+
-  geom_brace(aes(c(0.8, 1.2), c(200, 10)), inherit.data = F, rotate = 180) +
-  geom_brace(aes(c(1.8, 2.2), c(200, 10)), inherit.data = F, rotate = 180) +
+  coord_cartesian(clip = "off") +
+  #scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
+  geom_brace(aes(c(0.8, 1.2), c(2, 10)), inherit.data = F, rotate = 180) +
+  geom_brace(aes(c(1.8, 2.2), c(2, 10)), inherit.data = F, rotate = 180) +
   scale_x_continuous(breaks=1:9) +
   scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
   # single legend for color and shape
@@ -2184,7 +2196,13 @@ fig_s8a <- fig_s8_dat %>%
   annotate("text", x = 6, y = 125, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
   xlab("Degree of relationship (n)")+
   ylab("Covariance")+
-  theme(legend.position="none")
+  theme(legend.position="none",
+        panel.grid = element_blank(),
+      axis.text = element_text(size = 14),
+      axis.title = element_text(size = 16),
+      legend.title = element_text(size = 18),
+      strip.text = element_text(size = 16),
+      legend.text = element_text(size = 16))
 
 fig_s8b <- fig_s8_dat %>% 
   #pivot_wider(values_from=cov, names_from=gp) %>% 
