@@ -22,6 +22,7 @@ library(Hmisc)
 library(stringr)
 library(ggbrace)
 library(RColorBrewer)
+library(moments)
 ```
 
 
@@ -166,6 +167,19 @@ relations.df <- data.frame(relationship = relationship,
                                     dlin = c(0,1,0,1,0,0,0,0,0,0,0))
 ```
 
+```{r lineage df}
+lineage_n.df <- inds %>%
+  group_by(nid) %>%
+  summarise(n = n(),
+            min_occ = min(occ, na.rm = T),
+            max_occ = max(occ, na.rm = T),
+            range_occ = max_occ - min_occ)
+
+ggplot(lineage_n.df, aes(x = n, y = range_occ)) +
+  geom_point()
+```
+
+
 # Check correlations
 
 Make sure the correlations calculated from raw data match those in Clark (2023) Table 2
@@ -187,7 +201,7 @@ occstat_1780 <- rels_occ %>%
   summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1]) %>%
   mutate(measure = "occstat_1780") %>%
   left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
-  dplyr::select(relationship_rename, cor, measure)
+  dplyr::select(relationship_rename, cor_uncorr, lcl_uncorr, ucl_uncorr, measure)
 
 occstat_1860 <- rels_occ %>%
   filter(per1860 == 1) %>%
@@ -443,6 +457,7 @@ fig2b_new.gg <- ggplot() +
 plot_grid(fig2a_new.gg, fig2b_new.gg, nrow = 2, labels = c("(a)", "(b)"), label_size = 20, label_y = 0.94)
 
 ggsave("fig_2.png", width = 11, height = 12, units = "in")
+ggsave("fig_2.pdf", width = 11, height = 12, units = "in")
 ```
 
 
@@ -467,30 +482,60 @@ for(i in 1:1000){
       var=var(occ0, na.rm=T),
       cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1],
       cor_proper=cov/253,
-              n=n()) %>%
+      n=n(),
+      mean_byr1 = mean(byr1, na.rm = T),
+      mean_occ1 = mean(occ1, na.rm = T)) %>%
     mutate(run=i)
     
   
   ds_occstat <- bind_rows(ds_occstat, it)
 }
 
-ds_osd_m <- ds_occstat %>% 
-  group_by(relationship) %>% 
-  summarise(cor_mean=mean(cor), se=sqrt(var(cor))) %>%
-  mutate(trait="occstat") %>% 
-  merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>% 
-  left_join(occstat_1780) %>%
+
+occstat_1780_fig3 <- rels_occ %>%
+  filter(per1780 == 1) %>%
+  filter(relationship != "random") %>%
+#  filter(is.na(per1780)) %>%
+  group_by(relationship) %>%
+  summarise(cor_uncorr = cor.test(occ0, occ1, use = "complete.obs")$estimate[1],
+            lcl_uncorr = cor.test(occ0, occ1, use = "complete.obs")$conf.int[1],
+            ucl_uncorr = cor.test(occ0, occ1, use = "complete.obs")$conf.int[2]) %>%
+  mutate(measure = "occstat_1780") %>%
+  left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
+  dplyr::select(relationship_rename, cor_uncorr, lcl_uncorr, ucl_uncorr, measure)
+
+ds_osd_m <- ds_occstat %>%
+  group_by(relationship) %>%
+#  summarise(cor_mean=mean(cor), se=sqrt(var(cor))) %>%
+  summarise(cor_corr=mean(cor), 
+            se_corr=sqrt(var(cor)),
+#            mean = mean_cl_normal(cor)[1],
+#            lcl_corr = mean_cl_normal(cor)[1,2],
+#            ucl_corr = mean_cl_normal(cor)[1,3],
+#            lcl_corr = mean(cor) - sd(cor),
+#            ucl_corr = mean(cor) + sd(cor),
+             lcl_corr = quantile(cor, 0.025),  # Lower bound of the CI
+             ucl_corr = quantile(cor, 0.975)) %>%   # Upper bound of the CI
+  mutate(trait="occstat") %>%
+  merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>%
+  left_join(occstat_1780_fig3) %>%
   mutate(trait="occstat")
+
+
 ```
 
 
 ```{r plot Fig 3}
 corrected_vs_uncorrected_cors <- ds_osd_m %>% 
-  dplyr::select(relationship_rename, n, cor, cor_mean) %>%
-  pivot_longer(cor:cor_mean) %>% 
-  mutate(name=case_match(name,
-                         "cor" ~ "Clark (2023) estimation;\n using different sample variances and \n susceptible to pseudo-replication",
-                         "cor_mean" ~ "Unbiased estimation")) %>%
+  dplyr::select(relationship_rename, n, cor_uncorr, lcl_uncorr, ucl_uncorr, cor_corr, lcl_corr, ucl_corr) %>%
+  pivot_longer(
+    cols = c(cor_uncorr, lcl_uncorr, ucl_uncorr, cor_corr, lcl_corr, ucl_corr),
+    names_to = c(".value", "type"), 
+    names_pattern = "(.*)_(.*)"
+  ) %>%
+  mutate(name=case_match(type,
+                         "uncorr" ~ "Clark (2023) estimation;\nsusceptible to pseudo-replication",
+                         "corr" ~ "Estimation corrected \nfor pseudo-replication")) %>%
   mutate(relationship_rename = fct_recode(relationship_rename, "Siblings once removed" = "Uncle-nephew", "Grandparent-grandchild" = "Grandparent-Grandchild")) %>%
   mutate(n = ifelse(relationship_rename == "Parent-child", 1, ifelse(relationship_rename == "Grandparent-grandchild", 2, n))) %>%
   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
@@ -500,16 +545,16 @@ corrected_vs_uncorrected_cors <- ds_osd_m %>%
 # get means for line
 line.df <- corrected_vs_uncorrected_cors %>%
   group_by(name, n) %>%
-  summarise(mean_value = mean(value))
+  summarise(mean_value = mean(cor))
 
 
 # for labels
 hjust_adjustment <- 0.05
 
 corrected_vs_uncorrected_cors %>%
-  ggplot(aes(y=value, x=n_adj, shape=name, color = name, group=name))+
-  geom_point(size=5) +
-  geom_line(data = line.df, aes(x = n, y = mean_value, color = name, group = name), linewidth = 1) +
+  ggplot(aes(y=cor, ymin = lcl, ymax = ucl, x=n_adj, shape=name, color = name, group=name))+
+  geom_pointrange(size=1) +
+  geom_line(data = line.df, aes(x = n, y = mean_value, color = name, group = name, ymin = NULL, ymax = NULL), linewidth = 1) +
   # geom_text_repel(data=corrected_vs_uncorrected_cors %>%
   #                    group_by(n_adj) %>%
   #                    filter(value == max(value)),
@@ -519,8 +564,8 @@ corrected_vs_uncorrected_cors %>%
   #                 force = 1.5)+
   geom_text(data=corrected_vs_uncorrected_cors %>%
                      group_by(n_adj) %>%
-                     filter(value == max(value)),
-                   aes(y = 10^(log10(value) + hjust_adjustment), label=relationship_rename),
+                     filter(ucl == max(ucl)),
+                   aes(y = 10^(log10(ucl) + hjust_adjustment), label=relationship_rename),
                    colour="black",
                    angle = 90,
                     vjust = 0.3,
@@ -537,7 +582,7 @@ corrected_vs_uncorrected_cors %>%
   scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
   # single legend for color and shape
   xlab("Degree of relatedness (n)") +
-  annotate("text", x = 2.3, y = 0.12, label = "Clark (2023) estimation;\nsusceptible to pseudo-replication", hjust = 0, color = "#d8b365", size = 6) +
+  annotate("text", x = 2.25, y = 0.12, label = "Clark (2023) estimation;\nsusceptible to pseudo-replication", hjust = 0, color = "#d8b365", size = 6) +
   annotate("text", x = 0.8, y = 0.28, label = "Estimation\ncorrected for\npseudo-replication", hjust = 0, color = "#5ab4ac", size = 6) +
   geom_brace(aes(c(0.8, 1.2), c(0.069, 0.08)), inherit.data = F, rotate = 180) +
   geom_brace(aes(c(1.8, 2.2), c(0.069, 0.08)), inherit.data = F, rotate = 180) +
@@ -554,7 +599,60 @@ corrected_vs_uncorrected_cors %>%
         plot.margin = margin(1.3, 0.1, 0.1, 0.1, "in")) +
   guides(color = guide_legend(override.aes = list(shape = c(17, 16), linetype = 0))) 
 
+
+####
+## not log scale
+####
+
+# for labels
+hjust_adjustment <- 0.05
+
+corrected_vs_uncorrected_cors %>%
+  ggplot(aes(y=cor, ymin = lcl, ymax = ucl, x=n_adj, shape=name, color = name, group=name))+
+  geom_pointrange(size=1, position = position_dodge(width = 0.1)) +
+  geom_line(data = line.df, aes(x = n, y = mean_value, color = name, group = name, ymin = NULL, ymax = NULL), linewidth = 1) +
+  geom_text(data=corrected_vs_uncorrected_cors %>%
+                     group_by(n_adj) %>%
+                     filter(cor == max(cor)),
+                   aes(x = n_adj - 0.1, y = cor + hjust_adjustment, label=relationship_rename),
+                   colour="black",
+                   angle = 90,
+                    vjust = 0.3,
+            hjust = 0,
+            lineheight = 0.8)+
+  ylab("Correlation in occupational status") +
+  scale_x_continuous(breaks = 1:9) +
+#  scale_y_continuous(trans = log_trans()) +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
+#  annotation_logticks(sides="l") +
+  coord_cartesian(clip = "off") +
+#  scale_y_log10() +
+  scale_shape_manual(values=c(17,16)) +
+  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
+  # single legend for color and shape
+  xlab("Degree of relatedness (n)") +
+  annotate("text", x = 0.72, y = 0.16, label = "Clark (2023) estimation;\nsusceptible to\npseudo-replication", hjust = 0, color = "#d8b365", size = 5) +
+  annotate("text", x = 2.6, y = 0.01, label = "Estimation corrected for\npseudo-replication", hjust = 0, color = "#5ab4ac", size = 5) +
+  annotate("segment", x = 3.4, xend = 3.89, y = 0.23,  yend = 0.34, color = "#d8b365", linewidth = 0.7, lty = "dotted") +
+  annotate("segment", x = 5.4, xend = 5.9, y = 0.05,  yend = 0.15, color = "#5ab4ac", linewidth = 0.7, lty = "dotted") +
+  geom_brace(aes(c(0.8, 1.2), c(-0.12, -0.08)), inherit.data = F, rotate = 180) +
+  geom_brace(aes(c(1.8, 2.2), c(-0.12, -0.08)), inherit.data = F, rotate = 180) +
+  theme_classic() +
+  theme(legend.title=element_blank(),
+        legend.position= "none",
+#        axis.text.x=element_blank(),
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 16),
+        strip.text = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.key.height = unit(2.5, "lines"),
+        legend.background = element_blank(),
+#        legend.box.background = element_rect(linewidth = 1),
+        plot.margin = margin(1.3, 0.1, 0.1, 0.1, "in")) +
+  guides(color = guide_legend(override.aes = list(shape = c(17, 16), linetype = 0))) 
+
 ggsave("fig_3.png", width = 7, height = 6.2, units = "in")
+ggsave("fig_3.pdf", width = 7, height = 6.2, units = "in")
 
 
 ```
@@ -1066,7 +1164,8 @@ mobility_lit_pseud.gg <- results_df_lit %>%
 plot_grid(mobility_occ_pseud.gg, mobility_ded_pseud.gg, mobility_lit_pseud.gg, nrow = 3, rel_heights = c(0.9, 1.1, 1), labels = c("(a)", "(b)", "(c)"), label_y = c(0.9, 1, 1), label_x = 0.102, label_size = 18)
 
 
-ggsave("fig_4.png", width = 6, height = 13, units = "in")
+#ggsave("fig_4.png", width = 6, height = 13, units = "in")
+ggsave("fig_4.pdf", width = 6, height = 13, units = "in")
 ```
 
 ```{r plot all relatives}
@@ -2351,10 +2450,12 @@ occstat_confounders <- bind_rows(rel_corrs %>%
   slice_sample(n=1) %>% 
   group_by(relationship) %>% 
   summarise(mean_occstat=mean(occ, na.rm=T), 
+#            sd_occstat = sd(occ, na.rm = T),
             var_occstat=var(occ, na.rm=T), 
             mean_byr=mean(byr, na.rm=T), 
             var_byr=var(byr, na.rm=T), 
             mean_wealth=mean(wealth, na.rm=T), 
+#            sd_wealth = sd(wealth, na.rm = T),
             var_wealth=var(wealth, na.rm=T))
 
 
