@@ -303,6 +303,66 @@ plot_grid(cors.gg, labels = c("(a)"))
 ggsave("cors.png", width = 12, height = 10, units = "in")
 ```
 
+
+# b estimates
+```{r}
+# get original
+occstat_1780_cors <- rels_occ %>%
+  filter(per1780 == 1) %>%
+  filter(relationship != "random") %>%
+  left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
+  group_by(relationship, n, dlin) %>%
+  summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1])
+
+summary(lm(log(cor) ~ n + dlin, data = occstat_1780_cors))
+exp(-0.285)
+
+occstat_1780_nids <- rels_occ %>%
+  filter(per1780 == 1) %>%
+  filter(relationship != "random") %>%
+  left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
+  group_by(nid, relationship, n, dlin) %>%
+  filter(n() > 2) %>%
+  summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1]) %>%
+  group_by(nid) %>%
+  mutate(relationships = n()) %>%
+  filter(relationships > 3) %>%
+  ungroup() %>%
+  filter(!is.na(cor)) %>%
+  mutate(cor = ifelse(cor <= 0, 0.000001, cor)) 
+
+occstat_1780_nids %>%
+  filter(nid == 1072) %>%
+ggplot(aes(x = n, y = cor, color = as.factor(nid))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = F) +
+  theme(legend.position = "none")
+
+occstat_1780_nids_model <- occstat_1780_nids %>%
+  group_by(nid) %>%
+  do({
+    model <- lm(log(cor) ~ n + dlin, data = .)
+    data.frame(t(coef(model)))
+  }) %>%
+  ungroup() %>%
+  rename(Intercept = X.Intercept.) %>%
+  mutate(b = exp(n))
+
+occstat_1780_nids_model %>%
+  filter(b < 1) %>%
+ggplot(aes(x = b)) +
+  geom_histogram() +
+  labs(title = "b calculated for each surname", subtitle = "only using surnames with at least 4 relationship types available", y = "freq")
+
+
+
+  mutate(measure = "occstat_1780") %>%
+  left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
+  dplyr::select(relationship_rename, cor_uncorr, lcl_uncorr, ucl_uncorr, measure)
+```
+
+
+
 # Fig 2 - Paternal wealth
 
 Correlations between paternal wealth and status measures; plot occStat ~ paternal wealth; plot cor(occStat) ~ cor(paternal wealth)
@@ -864,6 +924,24 @@ ggsave("fig_s7.png", width = 8, height = 12, units = "in")
 
 ## Corrected for pseudo-rep
 
+```{r CI func}
+custom_fun <- function(data) {
+  data <- unlist(data)
+
+  # Calculate the mean
+  mean_val <- mean(data, na.rm = TRUE)
+
+  # Calculate the lower and upper confidence limits based on quantiles
+  lcl <- quantile(data, probs = 0.025, na.rm = TRUE)
+  ucl <- quantile(data, probs = 0.975, na.rm = TRUE)
+
+  # Return a data frame with the mean and confidence limits
+  return(data.frame(y = mean_val, ymin = lcl, ymax = ucl))
+}
+
+```
+
+
 ```{r occStat}
 ####
 #### Avoiding pseudoreplication
@@ -929,7 +1007,7 @@ mobility_occ_pseud.gg <- results_df_occ %>%
   filter(relationship == "father-son") %>%
   ggplot() +
   geom_line(data = means_occStat, aes(x = byr1_bin, y = estimate_mean, group = group)) +
-  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = "mean_cl_normal") +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
   labs(title = "Signals of change in social mobility",
        x = "",
        y = "Father-son correlation") +
@@ -989,6 +1067,7 @@ results_df_occ_perc <- do.call(rbind, results_list_occ_perc)
 
 #write.csv(results_df_occ_perc, "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/results_df_occ_perc.csv", row.names = F)
 #results_df_occ_perc <- read.csv(paste0(data_loc, "results_df_occ_perc.csv"))
+#results_df_occ_perc <- read.csv(paste0(data_loc, "results_df_occ_perc.csv"))
 
 ####
 ## Plot
@@ -1002,7 +1081,7 @@ means_occStat_perc <- results_df_occ_perc %>%
 occStat_percentile.gg <- results_df_occ_perc %>%
   ggplot() +
   geom_line(data = means_occStat_perc, aes(x = byr1_bin, y = estimate_mean, group = group)) +
-  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = "mean_cl_normal") +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
   labs(x = "Son birth year",
        y = "Father-son correlation in\n(percentile rank) occupational status") +
   #annotate("text", x = 5, y = 0.65, label = "italic('Occupational status')", size = 8, parse = TRUE) +
@@ -1076,7 +1155,7 @@ mobility_ded_pseud.gg <- results_df_ded %>%
   filter(relationship == "father-son") %>%
   ggplot() +
   geom_line(data = means_ded, aes(x = byr1_bin, y = estimate_mean, group = group)) +
-  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = "mean_cl_normal") +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
   labs(x = "",
        y = "Father-son correlation") +
   annotate("text", x = 5, y = 0.65, label = "italic('Higher education')", size = 8, parse = TRUE) +
@@ -1149,7 +1228,7 @@ mobility_lit_pseud.gg <- results_df_lit %>%
   filter(Relationship == "parent-child") %>%
   ggplot() +
   geom_line(data = means_lit, aes(x = byr1_bin, y = estimate_mean, group = group)) +
-  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = "mean_cl_normal") +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
   labs(x = "Offspring birth year",
        y = "Parent-child correlation") +
   annotate("text", x = 5, y = 0.5, label = "italic('Literacy')", size = 8, parse = TRUE) +
@@ -1164,7 +1243,7 @@ mobility_lit_pseud.gg <- results_df_lit %>%
 plot_grid(mobility_occ_pseud.gg, mobility_ded_pseud.gg, mobility_lit_pseud.gg, nrow = 3, rel_heights = c(0.9, 1.1, 1), labels = c("(a)", "(b)", "(c)"), label_y = c(0.9, 1, 1), label_x = 0.102, label_size = 18)
 
 
-#ggsave("fig_4.png", width = 6, height = 13, units = "in")
+ggsave("fig_4.png", width = 6, height = 13, units = "in")
 ggsave("fig_4.pdf", width = 6, height = 13, units = "in")
 ```
 
@@ -1179,8 +1258,8 @@ mobility_all.df <- results_df_occ %>%
   group_by(relationship_rename, byr1_bin, measure) %>%
   summarise(
     mean_value = mean(estimate, na.rm = TRUE),
-    lower_95 = mean(estimate, na.rm = TRUE) - 1.96 * (sd(estimate, na.rm = TRUE) / sqrt(n())),
-    upper_95 = mean(estimate, na.rm = TRUE) + 1.96 * (sd(estimate, na.rm = TRUE) / sqrt(n()))
+#    lower_95 = mean(estimate, na.rm = TRUE) - 1.96 * (sd(estimate, na.rm = TRUE) / sqrt(n())),
+#    upper_95 = mean(estimate, na.rm = TRUE) + 1.96 * (sd(estimate, na.rm = TRUE) / sqrt(n()))
   ) %>%
   ungroup() %>%
   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
@@ -1190,8 +1269,8 @@ mobility_all_rels.gg <- mobility_all.df %>%
   filter(!(measure == "Higher education" & relationship_rename == "Full siblings")) %>% # ded data for full siblings is incorrect in raw data 
   filter(measure != "Literacy") %>%
   mutate(measure = fct_relevel(measure, c("Occupational status"))) %>%
-ggplot(aes(x = byr1_bin, y = mean_value, ymin = lower_95, ymax = upper_95, color = relationship_rename, group = relationship_rename)) +
-  geom_pointrange(position = position_dodge(width = 0.2)) +
+ggplot(aes(x = byr1_bin, y = mean_value, color = relationship_rename, group = relationship_rename)) +
+  geom_point(position = position_dodge(width = 0.2)) +
   geom_line(position = position_dodge(width = 0.2)) +
   labs(x = "Birth Period",
        y = "Correlation",
@@ -1528,6 +1607,100 @@ wealth_coef_sum <- tidy(wealth_coef.lm, conf.int = T) %>%
 coefs.df <- bind_rows(ded_coef_sum, occ_coef_sum, wealth_coef_sum) %>%
   filter(term != "(Intercept)") %>%
   mutate(parent = ifelse(term %in% c("dedpgf", "occpgf", "lwealthpgf"), "Father (proxy)", "Mother (proxy)"))
+```
+
+```{r replicated}
+####
+## get model coefficients from trait ~ father + mother, using complete df (all_there)
+####
+
+# higher education
+mean(wealth$dedpgf, na.rm = T)
+var(wealth$occpgf, na.rm = T)
+
+ded_coef.lm <- lm(dedgc ~ dedpgf + dedmgf, data = wealth)
+summary(ded_coef.lm)
+ded_coef_sum <- tidy(ded_coef.lm, conf.int = T) %>%
+  mutate(trait = "Education")
+#plot_coef_ci(lm(dedgc ~ dedpgf + dedmgf, data = all_there))
+
+# occupational status
+mean(wealth$occpgf, na.rm = T)
+var(wealth$occpgf, na.rm = T)
+var(wealth$occmgf, na.rm = T)
+
+occ_coef.lm <- lm(occgc ~ occpgf + occmgf, data = wealth)
+summary(occ_coef.lm)
+occ_coef_sum <- tidy(occ_coef.lm, conf.int = T) %>%
+  mutate(trait = "Occupation")
+# plot_coef_ci(lm(occgc ~ occpgf + occmgf, data = all_there))
+
+# wealth
+wealth_coef.lm <- lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = wealth)
+summary(wealth_coef.lm)
+wealth_coef_sum <- tidy(wealth_coef.lm, conf.int = T) %>%
+  mutate(trait = "Wealth")
+#plot_coef_ci(lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = all_there))
+
+
+
+
+####
+## Tidy for plotting
+####
+
+coefs.df <- bind_rows(ded_coef_sum, occ_coef_sum, wealth_coef_sum) %>%
+  filter(term != "(Intercept)") %>%
+  mutate(parent = ifelse(term %in% c("dedpgf", "occpgf", "lwealthpgf"), "Father (proxy)", "Mother (proxy)"))
+```
+
+```{r corrected pseudorep}
+nrow(wealth %>% distinct(nid))
+
+matpat_occ_pseud <- data.frame()
+
+set.seed(124)
+
+for(i in 1:1000){
+  
+  matpat_occ_pseud_temp <- wealth %>%
+    group_by(nid) %>%
+    slice_sample(n=1) 
+  
+  occ_coef.lm <- lm(occgc ~ occpgf + occmgf, data = matpat_occ_pseud_temp)
+  ded_coef.lm <- lm(dedgc ~ dedpgf + dedmgf, data = matpat_occ_pseud_temp)
+  wealth_coef.lm <- lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = matpat_occ_pseud_temp)
+  
+  occ_coef_tidy <- tidy(occ_coef.lm) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(measure = "Occupational Status",
+           run = i)
+  
+  ded_coef_tidy <- tidy(ded_coef.lm) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(measure = "Higher Education",
+           run = i)
+  
+  wealth_coef_tidy <- tidy(wealth_coef.lm) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(measure = "Wealth",
+           run = i)
+  
+  matpat_occ_pseud <- bind_rows(matpat_occ_pseud, 
+                                occ_coef_tidy,
+                                ded_coef_tidy,
+                                wealth_coef_tidy)
+}
+
+matpat_occ_pseud %>%
+  mutate(matpat = ifelse(term %in% c("occmgf", "dedmgf", "lwealthmgf"), "Maternal", "Paternal")) %>%
+  group_by(measure, matpat) %>%
+  summarise(coef = mean(estimate), 
+             lcl_corr = quantile(estimate, 0.025),  # Lower bound of the CI
+             ucl_corr = quantile(estimate, 0.975)) %>%  # Upper bound of the CI
+  ggplot(aes(x = measure, y = coef, ymin = lcl_corr, ymax = ucl_corr, color = matpat)) +
+  geom_pointrange(position = position_dodge(width = 0.2))
+
 ```
 
 ```{r plot}
@@ -2690,6 +2863,194 @@ plot_grid(plot_grid(sims.gg, b.gg, nrow = 1, labels = c("(a)", "(b)"), rel_width
 ggsave("fig_s12.png", width = 10, height = 10, units = "in")
 
 ```
+
+#  simulate mat pat
+
+```{r simulate normal}
+set.seed(123)  # For reproducibility
+
+k <- 3000  # Number of simulations
+results <- vector("list", k)  # To store results
+
+for (i in 1:k) {
+  n <- 400  # Sample size
+#  n <- sample(10:1000, 1)  # Sample size
+  c <- runif(1, 0, 1)  # Correlation between x and z
+  d <- runif(1, -0.4, 0.4) # true coefficient difference
+  
+  # Generate correlated x and z
+  Sigma <- matrix(c(1, c, c, 1), nrow = 2)  # Covariance matrix
+  chol_decomp <- chol(Sigma)
+  norm_matrix <- matrix(rnorm(n*2, mean = 45, sd = 22), ncol = 2)
+  correlated_data <- norm_matrix %*% chol_decomp
+  
+  x <- correlated_data[, 1]
+  z <- correlated_data[, 2]
+  
+  # Generate y based on the model
+  epsilon <- rnorm(n, mean = 0, sd = 15)
+  y <- 15 + 0.33*x + (0.33-d)*z + epsilon  # Assuming beta_0=1, beta_1=2, beta_2=3
+  
+  # Fit linear model
+  fit <- lm(y ~ x + z)
+  
+  # Extract coefficients and confidence intervals
+  coef_est <- coef(fit)
+  ci <- confint(fit, level = 0.95)
+  
+  # Store results, including c
+  results[[i]] <- tibble(
+    run = i,
+    c = c,
+    n = n,
+    d = d,
+    beta_x = coef_est["x"],
+    beta_z = coef_est["z"],
+    ci_lower_x = ci["x", 1],
+    ci_upper_x = ci["x", 2],
+    ci_lower_z = ci["z", 1],
+    ci_upper_z = ci["z", 2]
+  )
+}
+
+# Combine all results into one tidy dataframe
+final_results <- bind_rows(results)
+
+final_results <- final_results %>%
+  mutate(overlap = (ci_lower_x < ci_upper_z & ci_upper_x > ci_lower_z) | 
+                   (ci_lower_z < ci_upper_x & ci_upper_z > ci_lower_x))
+
+final_results %>%
+  group_by(overlap) %>%
+  tally()
+
+final_results %>%
+  mutate(x_ci = ci_upper_x - ci_lower_x,
+         z_ci = ci_upper_z - ci_lower_z) %>%
+  group_by(n) %>%
+  summarise(x_ci_mean = mean(x_ci))
+  ggplot(aes(x = x_ci)) +
+  geom_histogram()
+
+```
+
+```{r plot}
+ggplot(final_results, aes(x = c, y = d, color = overlap)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "blue")) +
+  geom_vline(aes(xintercept = 0.72), linetype = 2, linewidth = 1.5) +
+  labs(title = "How different do mat/pat effects need to be to show 'significant' differences",
+       x = "AM correlation in trait",
+       y = "True coefficient / effect difference (d)",
+       color = "CIs Overlap") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+```{r permutation test}
+set.seed(123)  # For reproducibility
+n_permutations <- 1000  # Number of permutations
+original_model <- lm(occgc ~ occpgf + occmgf, data = wealth)
+original_statistic <- coef(original_model)  # Or any other statistic of interest
+
+permutation_stats <- replicate(n_permutations, {
+  # Permute the occpgf and occmgf while maintaining their correlation
+  # This is a simple way to do it, which might not maintain the exact correlation
+  permuted_occpgf <- sample(wealth$occpgf)
+  permuted_occmgf <- sample(wealth$occmgf)
+
+  # Fit the model to the permuted data
+  permuted_model <- lm(occgc ~ permuted_occpgf + permuted_occmgf, data = wealth)
+
+  # Extract the test statistic from the permuted model
+  coef(permuted_model)  # Or any other statistic of interest
+})
+
+# Calculate p-values
+p_values <- sapply(original_statistic, function(orig_stat, perm_stats) {
+  mean(abs(perm_stats) >= abs(orig_stat))
+}, perm_stats = permutation_stats)
+
+hist(p_values)  # The p-values for each coefficient
+
+```
+
+
+```{r simulate ber}
+set.seed(123)  # For reproducibility
+
+k <- 2000  # Number of simulations
+n <- 5000  # Sample size fixed at 5000
+results <- vector("list", k)  # To store results
+
+for (i in 1:k) {
+  c <- runif(1, 0, 1)  # Correlation between x and z, for information
+  d <- runif(1, 0, 0.3) # True coefficient difference
+  
+  # Generate binary x and z using a Bernoulli distribution (p=0.5 for simplicity)
+  x <- rbinom(n, 1, 0.1)
+#  z <- rbinom(n, 1, 0.1)
+  
+  # Generate z where the probability z = x is c
+  z <- ifelse(runif(n) < c, x, ifelse(x == 0, 1, 0))  # Generate z
+  corr = cor(x, z)
+  
+  # Generate y based on the model with binary predictors
+  epsilon <- rnorm(n, mean = 0, sd = 0.25)  # Error term
+  y <- 15 + 0.33*x + (0.33-d)*z + epsilon  # Linear combination plus error
+  
+  # Convert y to binary for the sake of alignment with the question, but commented out to follow instructions
+  # y <- ifelse(y > median(y), 1, 0)
+  
+  # Fit linear model
+  fit <- lm(y ~ x + z)
+  
+  # Extract coefficients and confidence intervals
+  coef_est <- coef(fit)
+  ci <- confint(fit, level = 0.95)
+  
+  # Store results, including c
+  results[[i]] <- tibble(
+    run = i,
+    c = c,
+    n = n,
+    d = d,
+    corr = corr,
+    beta_x = coef_est["x"],
+    beta_z = coef_est["z"],
+    ci_lower_x = ci["x", 1],
+    ci_upper_x = ci["x", 2],
+    ci_lower_z = ci["z", 1],
+    ci_upper_z = ci["z", 2]
+  )
+}
+
+# Combine all results into one tidy dataframe
+final_results_ber <- bind_rows(results)
+
+final_results_ber <- final_results_ber %>%
+  mutate(overlap = (ci_lower_x < ci_upper_z & ci_upper_x > ci_lower_z) | 
+                   (ci_lower_z < ci_upper_x & ci_upper_z > ci_lower_x))
+
+final_results_ber %>%
+  filter(corr > 0) %>%
+ggplot(aes(x = corr, y = d, color = overlap)) +
+  geom_point(alpha = 0.6) +
+  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "blue")) +
+  geom_vline(aes(xintercept = 0.5), linetype = 2, linewidth = 1.5) +
+  labs(title = "Relationship Between Correlation Coefficient, Sample Size, and CI Overlap",
+       x = "Correlation Coefficient (c)",
+       y = "True coefficient difference (d)",
+       color = "CI Overlap") +
+  theme_minimal()
+
+ggplot(final_results_ber, aes(x = c, y = corr)) +
+  geom_point()
+
+```
+
+
 
 
 
