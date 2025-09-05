@@ -230,8 +230,8 @@ tnc2 <- trait_nc2 %>%
 
 
 # BSB x # children (Fig 3b)
-bsb_nc2 <- results_all_b %>% dplyr::filter(op=="~" & lhs=="NC" & rhs=="bsb")
-bnc2 <- bsb_nc2 %>% 
+fig3b_data <- results_all_b %>% dplyr::filter(op=="~" & lhs=="NC" & rhs=="bsb")
+bnc2 <- fig3b_data %>% 
   dplyr::filter(!grepl("children", trait)) %>%
   dplyr::filter(!grepl("partners", trait)) %>%
   dplyr::filter(!grepl("osb_any", trait)) %>%

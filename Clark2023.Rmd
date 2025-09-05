@@ -8,10 +8,12 @@ editor_options:
 ---
 
 ```{r setup}
-library(tidyverse)
+
 library(ggpmisc)
 library(ggrepel)
 library(ggExtra)
+library(ggtext)
+library(ggbrace)
 library(mgcv)
 library(broom)
 library(cowplot)
@@ -20,15 +22,21 @@ library(scales)
 library(performance)
 library(Hmisc)
 library(stringr)
-library(ggbrace)
 library(RColorBrewer)
 library(moments)
+library(lmtest)
+library(sandwich)
+library(lme4)
+library(here)
+library(tidyverse)
 ```
 
 
 ```{r read data}
 # set data location
-data_loc <- "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/"
+data_loc <- here("data/")
+
+# See README for data provenance
 
 #### Reported correlations in Clark (2023) Table 2
 clark_cors <- read.csv(paste0(data_loc, "clark_reportedCors.csv"))
@@ -82,7 +90,7 @@ rels_occ <- rels_occ_orig %>%
 rels_ded <- read.csv(paste0(data_loc, "clark_rels_ded.csv"))
 
 #### Relative pairs (literacy)
-# from dataset 3, tab "Table 2 Literacy 1754-1889
+# from dataset 3, tab "Table 2 Literacy 1754-1889"
 rels_lit <- read.csv(paste0(data_loc, "clark_rels_lit.csv"))
 ```
 
@@ -109,7 +117,7 @@ theme_clark <- function() {
 
 ```{r lit long}
 ####
-## Make long literacy df
+## Make long literacy df (one individual per row)
 ####
 
 
@@ -146,38 +154,27 @@ wealth_long <- wealth %>%
 
 ```{r relationship df}
 # relationship vectors for matching names between all data sets
-relationship <- c("Full sibling", "Child", "Sibling-rem", "Grandchild", "Cousin", "Cousin-rem", "Cousin2", "Cousin2-rem", "Cousin3", "Cousin3-rem", "Cousin4")
+relationship_vec <- c("Full sibling", "Child", "Sibling-rem", "Grandchild", "Cousin", "Cousin-rem", "Cousin2", "Cousin2-rem", "Cousin3", "Cousin3-rem", "Cousin4")
 
 relationship_rels <- c("Siblings", "Parent-child", "siblings-removed", "Grandchild", "cousin1", "cousin-removed", "cousin2", "cousin2-rem", "cousin3", "cousin3-rem", "cousin4")
 
-relationship_rels_occ <- c("sons", "father-son", "siblings-rem", "grandson", "cousin", "cousin-rem", "cousin2", "cousin2-rem", "cousin3", "cousin3-rem", "cousin4")
+relationship_rels_occ_vec <- c("sons", "father-son", "siblings-rem", "grandson", "cousin", "cousin-rem", "cousin2", "cousin2-rem", "cousin3", "cousin3-rem", "cousin4")
 
 relationship_rels_lit <- c("siblings", "parent-child", "siblings-rem", "grandchild", "cousin", "cousin-rem", "cousin2", "cousin2-rem", "cousin3", "cousin3-rem", "cousin4")
 
-relationship_rename_vec <- c("Full siblings", "Parent-child", "Siblings once removed", "Grandparent-grandchild", "1st Cousins", "1st Cousins once removed", "2nd Cousins", "2nd Cousins once removed", "3rd Cousins", "3rd Cousins once removed", "4th Cousins")
+relationship_rename_vec <- c("Full siblings", "Parent-child", "Avuncular", "Grandparent-grandchild", "1st Cousins", "1st Cousins once removed", "2nd Cousins", "2nd Cousins once removed", "3rd Cousins", "3rd Cousins once removed", "4th Cousins")
 
 
 # make df with relationship, cor, and `n` and `d_lin` parameters from Eq 3
-relations.df <- data.frame(relationship = relationship,
+relations.df <- data.frame(relationship = relationship_vec,
                            relationship_rename = relationship_rename_vec,
                            relationship_rels = relationship_rels,
-                           relationship_rels_occ = relationship_rels_occ,
+                           relationship_rels_occ = relationship_rels_occ_vec,
                            relationship_rels_lit = relationship_rels_lit,
-                                    n = c(1,0,2,1,3,4,5,6,7,8,9),
+                                    n = c(1,0,2,1,3,4,5,6,7,8,9), # genealogical distance
                                     dlin = c(0,1,0,1,0,0,0,0,0,0,0))
 ```
 
-```{r lineage df}
-lineage_n.df <- inds %>%
-  group_by(nid) %>%
-  summarise(n = n(),
-            min_occ = min(occ, na.rm = T),
-            max_occ = max(occ, na.rm = T),
-            range_occ = max_occ - min_occ)
-
-ggplot(lineage_n.df, aes(x = n, y = range_occ)) +
-  geom_point()
-```
 
 
 # Check correlations
@@ -194,17 +191,17 @@ clark_cors_long.df <- clark_cors %>%
 
 
 occstat_1780 <- rels_occ %>%
-  filter(per1780 == 1) %>%
-  filter(relationship != "random") %>%
+  filter(per1780 == 1) %>% # filter to records born 1780-1859, as in C23
+  filter(relationship != "random") %>% # only keep pairs with known relationship; exclude random pairs
 #  filter(is.na(per1780)) %>%
   group_by(relationship) %>%
   summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1]) %>%
   mutate(measure = "occstat_1780") %>%
   left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
-  dplyr::select(relationship_rename, cor_uncorr, lcl_uncorr, ucl_uncorr, measure)
+  dplyr::select(relationship_rename, cor, measure)
 
 occstat_1860 <- rels_occ %>%
-  filter(per1860 == 1) %>%
+  filter(per1860 == 1) %>% # filter to records born after 1859, as in C23
   filter(relationship != "random") %>%
 #  filter(is.na(per1780)) %>%
   group_by(relationship) %>%
@@ -282,9 +279,9 @@ correlations.df <- occstat_1780 %>%
   mutate(cor = round(cor, 3)) %>%
   arrange(relationship_rename, measure, source)
 
-write.csv(correlations.df, "cors.csv", row.names = F)
+#write.csv(correlations.df, "cors.csv", row.names = F)
 
-cors.gg <- ggplot(correlations.df, aes(x = relationship_rename, y = cor, color = source)) +
+ggplot(correlations.df, aes(x = relationship_rename, y = cor, color = source)) +
   geom_point(position = position_dodge(width = 0.2)) +
   labs(x = "", y = "Correlation", color = "Source") +
   theme_bw() +
@@ -298,77 +295,19 @@ cors.gg <- ggplot(correlations.df, aes(x = relationship_rename, y = cor, color =
   guides(color = guide_legend(override.aes = list(size = 3))) +
   facet_wrap(~measure, ncol = 3) 
 
-plot_grid(cors.gg, labels = c("(a)"))
+#### Correlations look good with the exception of full sibling higher education. We alerted Dr. Clark of this discrepancy but did not receive any corrected data.
 
-ggsave("cors.png", width = 12, height = 10, units = "in")
 ```
 
 
-# b estimates
-```{r}
-# get original
-occstat_1780_cors <- rels_occ %>%
-  filter(per1780 == 1) %>%
-  filter(relationship != "random") %>%
-  left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
-  group_by(relationship, n, dlin) %>%
-  summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1])
+# Fig 2a - Paternal wealth
 
-summary(lm(log(cor) ~ n + dlin, data = occstat_1780_cors))
-exp(-0.285)
-
-occstat_1780_nids <- rels_occ %>%
-  filter(per1780 == 1) %>%
-  filter(relationship != "random") %>%
-  left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
-  group_by(nid, relationship, n, dlin) %>%
-  filter(n() > 2) %>%
-  summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1]) %>%
-  group_by(nid) %>%
-  mutate(relationships = n()) %>%
-  filter(relationships > 3) %>%
-  ungroup() %>%
-  filter(!is.na(cor)) %>%
-  mutate(cor = ifelse(cor <= 0, 0.000001, cor)) 
-
-occstat_1780_nids %>%
-  filter(nid == 1072) %>%
-ggplot(aes(x = n, y = cor, color = as.factor(nid))) +
-  geom_point() +
-  geom_smooth(method = "lm", se = F) +
-  theme(legend.position = "none")
-
-occstat_1780_nids_model <- occstat_1780_nids %>%
-  group_by(nid) %>%
-  do({
-    model <- lm(log(cor) ~ n + dlin, data = .)
-    data.frame(t(coef(model)))
-  }) %>%
-  ungroup() %>%
-  rename(Intercept = X.Intercept.) %>%
-  mutate(b = exp(n))
-
-occstat_1780_nids_model %>%
-  filter(b < 1) %>%
-ggplot(aes(x = b)) +
-  geom_histogram() +
-  labs(title = "b calculated for each surname", subtitle = "only using surnames with at least 4 relationship types available", y = "freq")
-
-
-
-  mutate(measure = "occstat_1780") %>%
-  left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
-  dplyr::select(relationship_rename, cor_uncorr, lcl_uncorr, ucl_uncorr, measure)
-```
-
-
-
-# Fig 2 - Paternal wealth
-
-Correlations between paternal wealth and status measures; plot occStat ~ paternal wealth; plot cor(occStat) ~ cor(paternal wealth)
+Calculate correlations between paternal wealth and status measures; plot occStat ~ paternal wealth; plot cor(occStat) ~ cor(paternal wealth)
 
 ```{r Table S2 correlations}
+#### Calculate correlations between paternal wealth and status measures
 
+# Create individual-level df with data on occupational status and paternal wealth
 inds_wealth <- inds %>%
   mutate(pid_fath = as.numeric(pid_fath)) %>%
   left_join(wealth_long %>% dplyr::select(pid, lwealth), by = join_by(pid)) %>%
@@ -377,14 +316,16 @@ inds_wealth <- inds %>%
   rename(wealth_fath = lwealth,
          occ_fath = occ1) 
 
-
+# Clean, smaller df
 inds_wealth.df <- inds_wealth %>%
   dplyr::select(ded, occ, imd, lhv, statmod, lit, wealth_fath)
 
+# Table S2 data
 pat_wealth_cor <- data.frame(cor(inds_wealth.df, use = "pairwise.complete.obs"))
 
-write.csv(pat_wealth_cor, "cor.csv")
+#write.csv(pat_wealth_cor, "cor.csv")
 
+# Calculate mean correlation between an individual's wealth and their status, across status measures
 mean(c(
 cor.test(inds_wealth$wealth_ind, inds_wealth$occ)$estimate,
 cor.test(inds_wealth$wealth_ind, inds_wealth$lit)$estimate,
@@ -395,7 +336,7 @@ cor.test(inds_wealth$wealth_ind, inds_wealth$codir)$estimate,
 cor.test(inds_wealth$wealth_ind, inds_wealth$statmod)$estimate))
 
 
-
+# Calculate mean correlation between an individual's father's wealth and the individual's status, across status measures
 mean(c(
 cor.test(inds_wealth$wealth_fath, inds_wealth$occ)$estimate,
 cor.test(inds_wealth$wealth_fath, inds_wealth$lit)$estimate,
@@ -405,133 +346,42 @@ cor.test(inds_wealth$wealth_fath, inds_wealth$imd)$estimate,
 cor.test(inds_wealth$wealth_fath, inds_wealth$codir)$estimate,
 cor.test(inds_wealth$wealth_fath, inds_wealth$statmod)$estimate))
 
-cor.test(inds_wealth$occ, inds_wealth$occ_fath)
-cor.test(inds_wealth$occ, inds_wealth$wealth_fath)
-cor.test(inds_wealth$occ_fath, inds_wealth$wealth_fath)
 
 ```
 
-```{r ind status ~ pat wealth}
-inds_wealth_complete <- inds_wealth %>%
-  filter(!is.na(occ_fath) & !is.na(wealth_fath) & !is.na(occ))
-
-
-
-
-
-####
-## Offspring occStat ~ paternal wealth
-####
+```{r df}
+# Make df for Fig 2a inset
 
 inds_wealth_1780 <- inds_wealth %>%
   filter(byr < 1860) %>%
+#  filter(byr > 1859) %>% # To check correlations for later birth cohort
   filter(!is.na(wealth_fath) & !is.na(occ))
+  # filter(between(wealth_fath, # to exclude outliers
+  #                quantile(wealth_fath, 0.25, na.rm = TRUE) - 1.5 * IQR(wealth_fath, na.rm = TRUE),
+  #                quantile(wealth_fath, 0.75, na.rm = TRUE) + 1.5 * IQR(wealth_fath, na.rm = TRUE)))
 
+
+# Correlation between individual's occupational status and their father's wealth
 cor.test(inds_wealth_1780$wealth_fath, inds_wealth_1780$occ)
 
-fig2a_new.gg <- ggplot(inds_wealth_1780, aes(x = wealth_fath, y = occ)) +
-  geom_point(alpha = 0.2) +
-  geom_smooth(method = "lm", se = F) +
-  labs(x = "Paternal wealth", y = "Offspring occupational status", title = "Occupational status is strongly correlated with paternal wealth", subtitle = "Across individuals") +
-  theme_classic() +
-  #annotate("text", x = -3, y = 5, label = "b = 0.43", size = 8) +
-  annotate("text", x = -8, y = 75, label = "italic(r)*' = 0.72'", size = 14, parse = T) +
-  theme(axis.text = element_text(size = 16),
-        axis.title = element_text(size = 22),
-        plot.title = element_text(size = 24, face = "bold"),
-        plot.subtitle = element_text(size = 22),
-        plot.margin = margin(5.5, 5.5, 30, 5.5, "points")) 
-
-ggsave("confound.png", width = 9.5, height = 5, units = "in")
 
 
 
 ```
 
-```{r occStat cor ~ wealth cor}
-fathers_sons <- rels_occ %>%
-  filter(relationship == "father-son") %>%
-  mutate(pid_father = pid0,
-         pid_son = pid1)
+# Figs 2b / S7 - Pseudoreplication
 
-rels_occ_fam_wealth <- rels_occ %>%
-  filter(per1780 == 1) %>%
-  left_join(fathers_sons %>% dplyr::select(pid_father, pid_son), by = join_by(pid0 == pid_son)) %>%
-  rename(pid0_father = pid_father) %>%
-  left_join(fathers_sons %>% dplyr::select(pid_father, pid_son), by = join_by(pid1 == pid_son)) %>%
-  rename(pid1_father = pid_father) %>%
-  filter(!is.na(pid0_father) & !is.na(pid1_father)) %>%
-  left_join(wealth_long %>% dplyr::select(pid, lwealth), by = join_by(pid0_father == pid)) %>%
-  rename(pid0_father_wealth = lwealth) %>%
-  left_join(wealth_long %>% dplyr::select(pid, lwealth), by = join_by(pid1_father == pid)) %>%
-  rename(pid1_father_wealth = lwealth) %>%
-  filter(!is.na(pid0_father_wealth) & !is.na(pid1_father_wealth)) %>%
-  filter(relationship != "random")
-
-
-
-predict_occ_sum.df <- rels_occ_fam_wealth %>%
-  group_by(relationship) %>%
-  mutate(relationship = tolower(relationship)) %>%
-  summarise(cor_occ = cor.test(occ0, occ1, use = "complete.obs")$estimate[1],
-            cor_father_wealth = cor.test(pid0_father_wealth, pid1_father_wealth, use = "complete.obs")$estimate[1])
-  #mutate(type = "wealth_predicted") %>%
-  #left_join(rels_occ.df1) %>%
-  #mutate(cor_diff = cor - cor_predict)
-
-m1 <- 0
-
-predict.df <- relations.df %>%
-  mutate(relationship = tolower(relationship)) %>%
-  # fix some mixed labeling
-  left_join(predict_occ_sum.df %>% mutate(relationship = ifelse(relationship == "father-son", "child", ifelse(relationship == "grandson", "grandchild", ifelse(relationship == "sons", "full sibling", ifelse(relationship == "siblings-rem", "sibling-rem", relationship)))))) %>%
-  mutate(shared_genotype = ifelse(relationship == "grandchild", ((1 + m1) / 2) ^ 2, ifelse(relationship == "child", ((1 + m1) / 2) ^ 1, ((1 + m1) / 2) ^ n))) %>% 
-  arrange(desc(cor_father_wealth))
-
-
-
-## how many unique individuals captured here?
-kk <- predict_occ.df %>%
-  pivot_longer(c(pid0, pid1)) %>%
-  distinct(value)
-
-cor.test(predict.df$cor_occ, predict.df$cor_father_wealth)
-
-fig2b_new.gg <- ggplot() +
-  geom_point(data = predict.df, aes(x = cor_father_wealth, y = cor_occ, label = relationship_rename), size = 4) +
-  geom_smooth(data = predict.df, aes(x = cor_father_wealth, y = cor_occ), method = "lm", se = F) +
-  #geom_smooth(data = predict.df[predict.df$relationship != "full sibling",], aes(x = cor_father_wealth, y = cor_occ), method = "lm", se = F, color = "red") +
-  geom_text_repel(data = predict.df, aes(x = cor_father_wealth, y = cor_occ, label = relationship_rename), size = 6, box.padding = 0.75) +
-  labs(x = "Correlation in paternal wealth", y = "Correlation in occupational status", title = "", subtitle = "Familial correlations") +
-  annotate("text", label = "italic(r)*' = 0.91'", x = 0.85, y = 0.2, size = 14, parse = T) +
-  #annotate("text", label = "italic(r)*' = 0.9'", x = 0.15, y = 0.6, size = 14, parse = T, color = "red") +
-  theme_classic() +
-   theme(axis.text = element_text(size = 16),
-         axis.title = element_text(size = 22),
-         plot.title = element_text(size = 24, face = "bold"),
-         plot.subtitle = element_text(size = 22)) 
-
-```
-
-```{r plot}
-plot_grid(fig2a_new.gg, fig2b_new.gg, nrow = 2, labels = c("(a)", "(b)"), label_size = 20, label_y = 0.94)
-
-ggsave("fig_2.png", width = 11, height = 12, units = "in")
-ggsave("fig_2.pdf", width = 11, height = 12, units = "in")
-```
-
-
-# Figs 3 / S7 - Pseudoreplication
-
-Demonstrating and correcting for pseudo-replication in the data (where individuals are represented multiple times and treated as independent) 
+Demonstrating and correcting for pseudo-replication in the data (where individuals are represented multiple times and treated as independent). 
 
 ```{r downsampling}
+#### Downsample to one record per lineage (nid) for 1000 bootstrap iterations
+
 ds_occstat <- data.frame()
 
 set.seed(124)
 
 for(i in 1:1000){
-  
+
   it <- rels_occ %>%
     dplyr::filter(per1780==1 & relationship !="random") %>%
     group_by(relationship, nid) %>%
@@ -546,12 +396,22 @@ for(i in 1:1000){
       mean_byr1 = mean(byr1, na.rm = T),
       mean_occ1 = mean(occ1, na.rm = T)) %>%
     mutate(run=i)
-    
-  
+
+
   ds_occstat <- bind_rows(ds_occstat, it)
+  
+   # Print progress every 100 iterations
+  if(i %% 100 == 0) {
+    print(paste("Completed", i, "iterations"))
+  }
 }
 
+#write.csv(ds_occstat, "ds_occstat.csv", row.names = F)
+#ds_occstat <- read.csv(paste0(data_loc, "ds_occstat.csv"))
 
+
+
+# Calculate pair correlations, without correcting for pseudoreplication
 occstat_1780_fig3 <- rels_occ %>%
   filter(per1780 == 1) %>%
   filter(relationship != "random") %>%
@@ -564,6 +424,8 @@ occstat_1780_fig3 <- rels_occ %>%
   left_join(relations.df, by = c("relationship" = "relationship_rels_occ")) %>%
   dplyr::select(relationship_rename, cor_uncorr, lcl_uncorr, ucl_uncorr, measure)
 
+
+# Make df that includes corrected and uncorrected pair correlations
 ds_osd_m <- ds_occstat %>%
   group_by(relationship) %>%
 #  summarise(cor_mean=mean(cor), se=sqrt(var(cor))) %>%
@@ -585,142 +447,10 @@ ds_osd_m <- ds_occstat %>%
 ```
 
 
-```{r plot Fig 3}
-corrected_vs_uncorrected_cors <- ds_osd_m %>% 
-  dplyr::select(relationship_rename, n, cor_uncorr, lcl_uncorr, ucl_uncorr, cor_corr, lcl_corr, ucl_corr) %>%
-  pivot_longer(
-    cols = c(cor_uncorr, lcl_uncorr, ucl_uncorr, cor_corr, lcl_corr, ucl_corr),
-    names_to = c(".value", "type"), 
-    names_pattern = "(.*)_(.*)"
-  ) %>%
-  mutate(name=case_match(type,
-                         "uncorr" ~ "Clark (2023) estimation;\nsusceptible to pseudo-replication",
-                         "corr" ~ "Estimation corrected \nfor pseudo-replication")) %>%
-  mutate(relationship_rename = fct_recode(relationship_rename, "Siblings once removed" = "Uncle-nephew", "Grandparent-grandchild" = "Grandparent-Grandchild")) %>%
-  mutate(n = ifelse(relationship_rename == "Parent-child", 1, ifelse(relationship_rename == "Grandparent-grandchild", 2, n))) %>%
-  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
-    mutate(n_adj = ifelse(relationship_rename == "Parent-child", 0.85, ifelse(relationship_rename == "Full siblings", 1.15, ifelse(relationship_rename == "Siblings once removed", 1.85, ifelse(relationship_rename == "Grandparent-grandchild", 2.15, n))))) 
-
-
-# get means for line
-line.df <- corrected_vs_uncorrected_cors %>%
-  group_by(name, n) %>%
-  summarise(mean_value = mean(cor))
-
-
-# for labels
-hjust_adjustment <- 0.05
-
-corrected_vs_uncorrected_cors %>%
-  ggplot(aes(y=cor, ymin = lcl, ymax = ucl, x=n_adj, shape=name, color = name, group=name))+
-  geom_pointrange(size=1) +
-  geom_line(data = line.df, aes(x = n, y = mean_value, color = name, group = name, ymin = NULL, ymax = NULL), linewidth = 1) +
-  # geom_text_repel(data=corrected_vs_uncorrected_cors %>%
-  #                    group_by(n_adj) %>%
-  #                    filter(value == max(value)),
-  #                  aes(label=relationship_rename),
-  #                  colour="black",
-  #                   nudge_y = 0.1,
-  #                 force = 1.5)+
-  geom_text(data=corrected_vs_uncorrected_cors %>%
-                     group_by(n_adj) %>%
-                     filter(ucl == max(ucl)),
-                   aes(y = 10^(log10(ucl) + hjust_adjustment), label=relationship_rename),
-                   colour="black",
-                   angle = 90,
-                    vjust = 0.3,
-            hjust = 0,
-            lineheight = 0.8)+
-  ylab("Correlation in occupational status") +
-  scale_x_continuous(breaks = 1:9) +
-#  scale_y_continuous(trans = log_trans()) +
-  scale_y_log10(expand = expansion(mult = c(0.02, 0.1))) + 
-  annotation_logticks(sides="l") +
-  coord_cartesian(clip = "off") +
-#  scale_y_log10() +
-  scale_shape_manual(values=c(17,16)) +
-  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
-  # single legend for color and shape
-  xlab("Degree of relatedness (n)") +
-  annotate("text", x = 2.25, y = 0.12, label = "Clark (2023) estimation;\nsusceptible to pseudo-replication", hjust = 0, color = "#d8b365", size = 6) +
-  annotate("text", x = 0.8, y = 0.28, label = "Estimation\ncorrected for\npseudo-replication", hjust = 0, color = "#5ab4ac", size = 6) +
-  geom_brace(aes(c(0.8, 1.2), c(0.069, 0.08)), inherit.data = F, rotate = 180) +
-  geom_brace(aes(c(1.8, 2.2), c(0.069, 0.08)), inherit.data = F, rotate = 180) +
-  theme_classic() +
-  theme(legend.title=element_blank(),
-        legend.position= "none",
-#        axis.text.x=element_blank(),
-        axis.text = element_text(size = 14),
-        axis.title = element_text(size = 16),
-        strip.text = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.key.height = unit(2, "lines"),
-        legend.box.background = element_rect(linewidth = 1),
-        plot.margin = margin(1.3, 0.1, 0.1, 0.1, "in")) +
-  guides(color = guide_legend(override.aes = list(shape = c(17, 16), linetype = 0))) 
-
-
-####
-## not log scale
-####
-
-# for labels
-hjust_adjustment <- 0.05
-
-corrected_vs_uncorrected_cors %>%
-  ggplot(aes(y=cor, ymin = lcl, ymax = ucl, x=n_adj, shape=name, color = name, group=name))+
-  geom_pointrange(size=1, position = position_dodge(width = 0.1)) +
-  geom_line(data = line.df, aes(x = n, y = mean_value, color = name, group = name, ymin = NULL, ymax = NULL), linewidth = 1) +
-  geom_text(data=corrected_vs_uncorrected_cors %>%
-                     group_by(n_adj) %>%
-                     filter(cor == max(cor)),
-                   aes(x = n_adj - 0.1, y = cor + hjust_adjustment, label=relationship_rename),
-                   colour="black",
-                   angle = 90,
-                    vjust = 0.3,
-            hjust = 0,
-            lineheight = 0.8)+
-  ylab("Correlation in occupational status") +
-  scale_x_continuous(breaks = 1:9) +
-#  scale_y_continuous(trans = log_trans()) +
-  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
-#  annotation_logticks(sides="l") +
-  coord_cartesian(clip = "off") +
-#  scale_y_log10() +
-  scale_shape_manual(values=c(17,16)) +
-  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
-  # single legend for color and shape
-  xlab("Degree of relatedness (n)") +
-  annotate("text", x = 0.72, y = 0.16, label = "Clark (2023) estimation;\nsusceptible to\npseudo-replication", hjust = 0, color = "#d8b365", size = 5) +
-  annotate("text", x = 2.6, y = 0.01, label = "Estimation corrected for\npseudo-replication", hjust = 0, color = "#5ab4ac", size = 5) +
-  annotate("segment", x = 3.4, xend = 3.89, y = 0.23,  yend = 0.34, color = "#d8b365", linewidth = 0.7, lty = "dotted") +
-  annotate("segment", x = 5.4, xend = 5.9, y = 0.05,  yend = 0.15, color = "#5ab4ac", linewidth = 0.7, lty = "dotted") +
-  geom_brace(aes(c(0.8, 1.2), c(-0.12, -0.08)), inherit.data = F, rotate = 180) +
-  geom_brace(aes(c(1.8, 2.2), c(-0.12, -0.08)), inherit.data = F, rotate = 180) +
-  theme_classic() +
-  theme(legend.title=element_blank(),
-        legend.position= "none",
-#        axis.text.x=element_blank(),
-        axis.text = element_text(size = 14),
-        axis.title = element_text(size = 16),
-        strip.text = element_text(size = 16),
-        legend.text = element_text(size = 14),
-        legend.key.height = unit(2.5, "lines"),
-        legend.background = element_blank(),
-#        legend.box.background = element_rect(linewidth = 1),
-        plot.margin = margin(1.3, 0.1, 0.1, 0.1, "in")) +
-  guides(color = guide_legend(override.aes = list(shape = c(17, 16), linetype = 0))) 
-
-ggsave("fig_3.png", width = 7, height = 6.2, units = "in")
-ggsave("fig_3.pdf", width = 7, height = 6.2, units = "in")
-
-
-```
-
-
 ## Fig S7 
 
-```{r Jed inds v pairs}
+```{r inds v pairs}
+# Calculate how many unique individuals and how many reported pairs are present in each relationship class
 pr_ind <- rels_occ %>% 
   dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
   group_by(relationship, nid) %>% 
@@ -741,9 +471,10 @@ pr_ind <- rels_occ %>%
                          # "num_lineages" ~ "Number of surname lineages",
                          "num_pairs" ~ "Number of pairs", "num_inds" ~
                            "Number of individuals"))
-
+# Fix names
 pr_ind$relationship_rename <- factor(pr_ind$relationship_rename, levels= pr_ind %>% group_by(relationship_rename) %>% slice_sample(n=1) %>% arrange(n) %>% pull(relationship_rename))
 
+# Fig S7a bar plot
 inds_v_pairs.gg <- pr_ind %>%
   # dplyr::filter(name!="Number of surname lineages") %>%
   ggplot(aes(x=relationship_rename, y=value, fill=name))+
@@ -765,6 +496,7 @@ inds_v_pairs.gg <- pr_ind %>%
 
 ### Heatmap
 ```{r occStat 1780}
+#### Generate heatmap to visualize extent of pseudoreplication
 inds_occStat_1780 <- rels_occ %>%
   filter(per1780 == 1 & !is.na(occ0) & !is.na(occ1)) %>%
   filter(relationship != "random") %>%
@@ -773,9 +505,21 @@ inds_occStat_1780 <- rels_occ %>%
                names_to = c(".value", "group"),
                names_pattern = "(.*)(\\d)$") 
 
+# Check for number of unique individuals
 unique_check <- inds_occStat_1780 %>%
   filter(relationship == "cousin4") %>%
   distinct(pid)
+
+# get number duplicated
+dups <- inds_occStat_1780 %>%
+  group_by(relationship, pid) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  group_by(relationship) %>%
+  summarise(
+    unique_pids = sum(count == 1),
+    repeated_pids = sum(count > 1)
+  ) %>%
+  mutate(perc_dup = repeated_pids / (unique_pids + repeated_pids))
 
 
 # get list of relationships
@@ -788,7 +532,7 @@ pseudo_df <- data.frame(
   pseudo_index = numeric()
 )
 
-# calculate pseudo-rep statistic for each combination of relationships
+# calculate pseudo-rep statistic (the average number of times an individual is included as a member of a pair) for each combination of relationships
 for (i in seq_along(unique_relationships)) {
   for (j in seq_along(unique_relationships)) {
       combo <- inds_occStat_1780 %>% filter(relationship == unique_relationships[i] | relationship == unique_relationships[j])
@@ -821,7 +565,7 @@ left_join(relations.df %>% dplyr::select(relationship_rename, relationship_rels_
   mutate(row_num = row_number(),
          value = ifelse(row_num <= as.numeric(rel1), pseudo_index, NA)) %>%
   ungroup() %>%
-  select(-row_num)  # Optional: remove the helper column 'row_num'
+  select(-row_num)  # remove the helper column 'row_num'
 
 mean(pseudo_df1$value, na.rm = T)
 
@@ -840,74 +584,6 @@ heatmap.gg <- ggplot(data = pseudo_df1, aes(rel1, rel2)) +
 #ggsave("pseudo.png", width = 7, height = 6, units = "in")
 ```
 
-```{r ded}
-inds_ded_1780 <- rels_ded %>%
-  filter(per1780 == 1) %>%
-  filter(relationship != "random") %>%
-  dplyr::select(relationship, pid0, pid1) %>%
-  pivot_longer(cols = c(pid0, pid1),
-               names_to = c(".value", "group"),
-               names_pattern = "(.*)(\\d)$") 
-
-
-unique_relationships <- unique(inds_ded_1780$relationship)
-
-pseudo_df_ded <- data.frame(
-  relationship_1 = character(),
-  relationship_2 = character(),
-  pseudo_index = numeric()
-)
-
-for (i in seq_along(unique_relationships)) {
-  for (j in seq_along(unique_relationships)) {
-      combo <- inds_ded_1780 %>% filter(relationship == unique_relationships[i] | relationship == unique_relationships[j])
-      
-      inds <- nrow(combo)
-      
-      inds_distinct <- combo %>%
-        distinct(pid)
-      
-      pseudo_value <- inds / nrow(inds_distinct)
-      
-      pseudo_df_ded <- bind_rows(pseudo_df_ded, data.frame(
-        relationship_1 = unique_relationships[i],
-        relationship_2 = unique_relationships[j],
-        pseudo_index = pseudo_value
-      ))
-  }
-}
-
-pseudo_df1_ded <- pseudo_df_ded %>%
-    left_join(relations.df %>% dplyr::select(relationship_rename, relationship_rels_occ), by = c("relationship_1" = "relationship_rels_occ")) %>%
-  rename(rel1 = relationship_rename) %>%
-left_join(relations.df %>% dplyr::select(relationship_rename, relationship_rels_occ), by = c("relationship_2" = "relationship_rels_occ")) %>%
-  rename(rel2 = relationship_rename) %>%
-  mutate(rel1 = fct_relevel(rel1, relationship_rename_vec),
-         rel2 = fct_relevel(rel2, relationship_rename_vec)) %>%
-  group_by(rel1) %>%
-  arrange(rel1, rel2) %>%
-  mutate(row_num = row_number(),
-         value = ifelse(row_num <= as.numeric(rel1), pseudo_index, NA)) %>%
-  ungroup() %>%
-  select(-row_num)  # Optional: remove the helper column 'row_num'
-
-mean(pseudo_df1_ded$value, na.rm = T)
-
-# Plot the heatmap
-ggplot(data = pseudo_df1_ded, aes(rel1, rel2)) +
-  geom_tile(aes(fill = value), color = "white") +
-  scale_fill_gradient(low = "#9ecae1", high = "#d95f0e", na.value = "white", limits = c(1, 24)) +
-  labs(x = "", y = "", fill = "Extent of double-counting\nof individuals") +
-  theme_clark() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        legend.position = c(0.4, 0.7),
-        legend.background = element_blank()) 
-  
-
-
-ggsave("pseudo.png", width = 7, height = 6, units = "in")
-```
-
 
 ### Plot S7
 
@@ -920,11 +596,16 @@ ggsave("fig_s7.png", width = 8, height = 12, units = "in")
 
 
 
-# Figs 4 / S13 - Social mobility
+# Figs 2c / S13 - Social mobility
 
-## Corrected for pseudo-rep
+Here we look at patterns of social mobility through time, by analyzing familial correlations through time for various status measures.
 
-```{r CI func}
+## Corrected for pseudoreplication
+
+```{r functions}
+# functions used below
+
+# Function to calculate mean and confidence limits
 custom_fun <- function(data) {
   data <- unlist(data)
 
@@ -939,13 +620,19 @@ custom_fun <- function(data) {
   return(data.frame(y = mean_val, ymin = lcl, ymax = ucl))
 }
 
+# Function to calculate percentile ranks
+calc_percentile_rank <- function(vec) {
+  rank(vec) / (length(vec) + 1) * 100
+}
+
 ```
 
+Now we will (partially) correct for pseudoreplication by running 500 bootstrap iterations of correlation estimation, sampling one record per lineage (nid) each iteration. We'll do this for multiple status measures: occupational status (raw index and percentile rank), higher education, literacy, and wealth.
 
 ```{r occStat}
-####
-#### Avoiding pseudoreplication
-####
+#### Occupational status
+
+# bin records into birth year cohorts
 mobility_occStat_sub <- rels_occ %>%
 #  filter(relationship == "father-son")
   mutate(byr1_bin = cut(byr1, 
@@ -954,14 +641,10 @@ mobility_occStat_sub <- rels_occ %>%
                       include.lowest = TRUE,
                       right = TRUE))
 
-kk <- mobility_occStat_sub %>%
-  filter(byr1 == 1899)
-
-
-# Determine the number of iterations
+# Number of iterations
 n_iter <- 500
 
-# Pre-allocate a list to store the results
+# Make a list to store the results
 results_list_occ <- vector("list", n_iter)
 
 set.seed(123)
@@ -990,45 +673,23 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_occ <- do.call(rbind, results_list_occ)
 
-#write.csv(results_df_occ, "results_df_occ.csv", row.names = F)
+#write.csv(results_df_occ, "data/results_df_occ.csv", row.names = F)
 #results_df_occ <- read.csv(paste0(data_loc, "results_df_occ.csv"))
 
-####
-## Plot
-####
 
+# get means for plotting
 means_occStat <- results_df_occ %>%
   filter(relationship == "father-son") %>%
   group_by(byr1_bin) %>%
   summarise(estimate_mean = mean(estimate)) %>%
   mutate(group = "occ")
 
-mobility_occ_pseud.gg <- results_df_occ %>%
-  filter(relationship == "father-son") %>%
-  ggplot() +
-  geom_line(data = means_occStat, aes(x = byr1_bin, y = estimate_mean, group = group)) +
-  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
-  labs(title = "Signals of change in social mobility",
-       x = "",
-       y = "Father-son correlation") +
-  annotate("text", x = 5, y = 0.65, label = "italic('Occupational status')", size = 8, parse = TRUE) +
-  theme_classic() +
-  theme(axis.text.x = element_blank(),
-        axis.title.x = element_blank(),
-        axis.text.y = element_text(size = 14),
-        axis.title.y = element_text(size = 18),
-        plot.title = element_text(size = 22))
 ```
 
 ```{r occStat percentile}
-####
-#### Avoiding pseudoreplication
-####
+#### Occupational status (percentile rank)
 
-# Function to calculate percentile ranks
-calc_percentile_rank <- function(vec) {
-  rank(vec) / (length(vec) + 1) * 100
-}
+
 
 # Determine the number of iterations
 n_iter <- 500
@@ -1065,13 +726,10 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_occ_perc <- do.call(rbind, results_list_occ_perc)
 
-#write.csv(results_df_occ_perc, "C:/Users/jwbenning/Documents/GitHubRepos/Clark_PNAS/results_df_occ_perc.csv", row.names = F)
-#results_df_occ_perc <- read.csv(paste0(data_loc, "results_df_occ_perc.csv"))
+#write.csv(results_df_occ_perc, "data/results_df_occ_perc.csv", row.names = F)
 #results_df_occ_perc <- read.csv(paste0(data_loc, "results_df_occ_perc.csv"))
 
-####
-## Plot
-####
+
 
 means_occStat_perc <- results_df_occ_perc %>%
   group_by(byr1_bin) %>%
@@ -1082,21 +740,21 @@ occStat_percentile.gg <- results_df_occ_perc %>%
   ggplot() +
   geom_line(data = means_occStat_perc, aes(x = byr1_bin, y = estimate_mean, group = group)) +
   stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
-  labs(x = "Son birth year",
-       y = "Father-son correlation in\n(percentile rank) occupational status") +
-  #annotate("text", x = 5, y = 0.65, label = "italic('Occupational status')", size = 8, parse = TRUE) +
-  theme_clark() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        panel.grid = element_blank())
-
+  labs(x = "Child birth year",
+       y = "Correlation") +
+  annotate("text", x = 5, y = 0.65, label = "italic('Occupational status\n(percentile rank)')", size = 8, parse = TRUE) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
+        panel.grid = element_blank(),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_text(size = 18))
 
 ```
 
 
 ```{r ded}
-####
-#### Avoiding pseudoreplication
-####
+#### Higher education
+
 mobility_ded_sub <- rels_ded %>%
 #  filter(relationship == "father-son")
     mutate(byr1_bin = cut(byr1, 
@@ -1137,13 +795,9 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_ded <- do.call(rbind, results_list_ded)
 
-#write.csv(results_df_ded, "results_df_ded.csv", row.names = F)
+#write.csv(results_df_ded, "data/results_df_ded.csv", row.names = F)
 #results_df_ded <- read.csv(paste0(data_loc, "results_df_ded.csv"))
 
-
-####
-## Plot
-####
 
 means_ded <- results_df_ded %>%
   filter(relationship == "father-son") %>%
@@ -1151,24 +805,11 @@ means_ded <- results_df_ded %>%
   summarise(estimate_mean = mean(estimate, na.rm = T)) %>%
   mutate(group = "ded")
 
-mobility_ded_pseud.gg <- results_df_ded %>%
-  filter(relationship == "father-son") %>%
-  ggplot() +
-  geom_line(data = means_ded, aes(x = byr1_bin, y = estimate_mean, group = group)) +
-  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
-  labs(x = "",
-       y = "Father-son correlation") +
-  annotate("text", x = 5, y = 0.65, label = "italic('Higher education')", size = 8, parse = TRUE) +
-  theme_classic() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
-        axis.text.y = element_text(size = 14),
-        axis.title = element_text(size = 18))
 ```
 
 ```{r lit}
-####
-#### Avoiding pseudoreplication
-####
+#### Literacy
+
 mobility_lit_sub <- rels_lit %>%
   filter(!is.na(byr1)) %>%
   #filter(byr1 > 1720) %>%
@@ -1210,13 +851,9 @@ for(i in seq_len(n_iter)) {
 # Combine all the results into a single data frame
 results_df_lit <- do.call(rbind, results_list_lit)
 
-#write.csv(results_df_lit, "results_df_lit.csv", row.names = F)
+#write.csv(results_df_lit, "data/results_df_lit.csv", row.names = F)
 #results_df_lit <- read.csv(paste0(data_loc, "results_df_lit.csv"))
 
-
-####
-## Plot
-####
 
 means_lit <- results_df_lit %>%
   filter(Relationship == "parent-child") %>%
@@ -1224,30 +861,146 @@ means_lit <- results_df_lit %>%
   summarise(estimate_mean = mean(estimate, na.rm = T)) %>%
   mutate(group = "lit")
 
-mobility_lit_pseud.gg <- results_df_lit %>%
-  filter(Relationship == "parent-child") %>%
+```
+
+```{r wealth}
+#### Wealth
+
+# make df and bin by birth cohort
+mobility_wealth <- rels_occ %>%
+  left_join(wealth_long, by = join_by(pid0 == pid)) %>%
+  rename(wealth0 = lwealth) %>%
+  left_join(wealth_long, by = join_by(pid1 == pid)) %>%
+  rename(wealth1 = lwealth) %>%
+  filter(!is.na(wealth0) & !is.na(wealth1)) %>%
+  filter(relationship == "father-son") %>%
+  mutate(byr1_bin = cut(byr1, 
+                      breaks = seq(1780, 1920, by = 20) - 1,
+                      labels = paste0(seq(1780, 1920 - 20, by = 20), "-", seq(1799, 1920 - 1, by = 20)),
+                      include.lowest = TRUE,
+                      right = TRUE))
+
+
+
+# Determine the number of iterations
+n_iter <- 500
+
+# Pre-allocate a list to store the results
+results_list_wealth <- vector("list", n_iter)
+
+set.seed(123)
+
+# Loop over the number of iterations
+for(i in seq_len(n_iter)) {
+  
+  single_run_result <- mobility_wealth %>%
+#    filter(relationship == "father-son") %>%
+    group_by(byr1_bin, nid) %>%
+    slice_sample(n = 1) %>%
+    group_by(byr1_bin) %>%
+    filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
+    do(tidy(cor.test(.$wealth0, .$wealth1, method = "pearson"))) %>%
+    dplyr::select(byr1_bin, estimate, conf.low, conf.high)
+  
+  # Store the result in the list
+  results_list_wealth[[i]] <- single_run_result
+  
+  # Print progress every 100 iterations
+  if(i %% 100 == 0) {
+    print(paste("Completed", i, "iterations"))
+  }
+  
+}
+
+# Combine all the results into a single data frame
+results_df_wealth <- do.call(rbind, results_list_wealth)
+
+quantile(results_df_wealth[results_df_wealth$byr1_bin == "1900-1919",]$estimate, probs = 0.975, na.rm = TRUE)
+
+#write.csv(results_df_wealth, "data/results_df_wealth.csv", row.names = F)
+#results_df_wealth <- read.csv(paste0(data_loc, "results_df_wealth.csv"))
+
+
+means_wealth <- results_df_wealth %>%
+  group_by(byr1_bin) %>%
+  summarise(estimate_mean = mean(estimate)) %>%
+  mutate(group = "wealth")
+
+```
+
+```{r wealth perc}
+#### Wealth (percentile rank)
+
+# Determine the number of iterations
+n_iter <- 500
+
+# Pre-allocate a list to store the results
+results_list_wealth_perc <- vector("list", n_iter)
+
+set.seed(123)
+
+# Loop over the number of iterations
+for(i in seq_len(n_iter)) {
+  
+  single_run_result <- mobility_wealth %>%
+#    filter(relationship == "father-son") %>%
+    group_by(byr1_bin, nid) %>%
+    slice_sample(n = 1) %>%
+    group_by(byr1_bin) %>%
+    filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
+    mutate(wealth0_rank = calc_percentile_rank(wealth0),
+           wealth1_rank = calc_percentile_rank(wealth1)) %>%
+    do(tidy(cor.test(.$wealth0_rank, .$wealth1_rank, method = "pearson"))) %>%
+    dplyr::select(byr1_bin, estimate, conf.low, conf.high)
+  
+  # Store the result in the list
+  results_list_wealth_perc[[i]] <- single_run_result
+  
+  # Print progress every 100 iterations
+  if(i %% 100 == 0) {
+    print(paste("Completed", i, "iterations"))
+  }
+  
+}
+
+# Combine all the results into a single data frame
+results_df_wealth_perc <- do.call(rbind, results_list_wealth_perc)
+
+
+#write.csv(results_df_wealth_perc, "data/results_df_wealth_perc.csv", row.names = F)
+#results_df_wealth_perc <- read.csv(paste0(data_loc, "results_df_wealth_perc.csv"))
+
+
+means_wealth_perc <- results_df_wealth_perc %>%
+  group_by(byr1_bin) %>%
+  summarise(estimate_mean = mean(estimate)) %>%
+  mutate(group = "wealth")
+
+wealth_percentile.gg <- results_df_wealth_perc %>%
   ggplot() +
-  geom_line(data = means_lit, aes(x = byr1_bin, y = estimate_mean, group = group)) +
+  geom_line(data = means_wealth_perc, aes(x = byr1_bin, y = estimate_mean, group = group)) +
   stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
-  labs(x = "Offspring birth year",
-       y = "Parent-child correlation") +
-  annotate("text", x = 5, y = 0.5, label = "italic('Literacy')", size = 8, parse = TRUE) +
+  labs(x = "Child birth year",
+       y = "Correlation") +
+  annotate("text", x = 4, y = 0.57, label = "italic('Wealth (percentile rank)')", size = 8, parse = TRUE) +
+  scale_y_continuous(breaks = c(0, 0.2, 0.4, 0.6)) +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
+        panel.grid = element_blank(),
         axis.text.y = element_text(size = 14),
         axis.title = element_text(size = 18))
+
 ```
 
 
-```{r plot Fig 4}
-plot_grid(mobility_occ_pseud.gg, mobility_ded_pseud.gg, mobility_lit_pseud.gg, nrow = 3, rel_heights = c(0.9, 1.1, 1), labels = c("(a)", "(b)", "(c)"), label_y = c(0.9, 1, 1), label_x = 0.102, label_size = 18)
 
 
-ggsave("fig_4.png", width = 6, height = 13, units = "in")
-ggsave("fig_4.pdf", width = 6, height = 13, units = "in")
-```
 
-```{r plot all relatives}
+
+```{r all relatives}
+# Get correlations in occupational status and higher education for all relationship classes
+
+# for Fig S13
 mobility_all.df <- results_df_occ %>%
   mutate(measure = "Occupational status") %>%
   bind_rows(results_df_ded %>% mutate(measure = "Higher education")) %>%
@@ -1290,10 +1043,30 @@ ggplot(aes(x = byr1_bin, y = mean_value, color = relationship_rename, group = re
 ```
 
 
-## Not Corrected
+## Correlations not Corrected for pseudoreplication
+
+```{r wealth}
+# Divide into birth year cohorts
+rels_wealth_binned <- rels_occ %>%
+  left_join(wealth_long, by = join_by(pid0 == pid)) %>%
+  rename(wealth0 = lwealth) %>%
+  left_join(wealth_long, by = join_by(pid1 == pid)) %>%
+  rename(wealth1 = lwealth) %>%
+  filter(!is.na(wealth0) & !is.na(wealth1)) %>%
+  mutate(byr1_bin = cut(byr1, 
+                      breaks = seq(1780, 1920, by = 20) - 1,
+                      labels = paste0(seq(1780, 1920 - 20, by = 20), "-", seq(1799, 1920 - 1, by = 20)),
+                      include.lowest = TRUE,
+                      right = TRUE)) %>%
+  group_by(relationship, byr1_bin) %>%
+  filter(n() > 10) %>% # must have more than 10 data points (to avoid spurious correlations)
+  do(tidy(cor.test(.$wealth0, .$wealth1, method = "pearson"))) %>%
+  dplyr::select(relationship, byr1_bin, estimate, conf.low, conf.high)
+
+```
 
 ```{r occStat}
-# Divide byr1 into 20-year bins
+# Divide into birth year cohorts
 rels_occ_binned <- rels_occ %>%
   mutate(byr1_bin = cut(byr1, 
                       breaks = seq(1780, 1920, by = 20) - 1,
@@ -1308,7 +1081,7 @@ rels_occ_binned <- rels_occ %>%
 
 ```{r ded}
 
-# Divide byr1 into 20-year bins
+# Divide into birth year cohorts
 rels_ded_binned <- rels_ded %>%
   mutate(byr1_bin = cut(byr1, 
                       breaks = seq(1780, 1920, by = 20) - 1,
@@ -1326,7 +1099,7 @@ rels_ded_binned <- rels_ded %>%
 ```
 
 ```{r lit}
-# Divide byr1 into 20-year bins
+# Divide into birth year cohorts
 rels_lit_binned_cors <- rels_lit %>%
   filter(!is.na(byr1)) %>%
   mutate(byr1_bin = cut(byr1, breaks = seq(1700, 1880, by = 20) - 1,
@@ -1343,7 +1116,9 @@ rels_lit_binned_cors <- rels_lit %>%
 
 ```
 
-```{r plot parent-offspring}
+```{r plot}
+
+# get df with both occupational status and education
 mobility.df <- rels_ded_binned %>%
   filter(relationship == "father-son") %>%
   mutate(trait = "Education") %>%
@@ -1364,8 +1139,9 @@ mobility_occ.gg <- mobility.df %>%
   #stat_smooth(method = "lm") +
   #geom_bar(stat = "identity") +
   labs(x = "",
-       y = "Father-son correlation") +
+       y = "Correlation") +
   annotate("text", x = 5, y = 0.65, label = "italic('Occupational status')", size = 8, parse = TRUE) +
+  scale_y_continuous(breaks = c(0.5, 0.6, 0.7)) +
   theme_classic() +
   theme(axis.text.x = element_blank(),
         axis.title.x = element_blank(),
@@ -1386,7 +1162,7 @@ mobility_edu.gg <- mobility.df %>%
   #stat_smooth(method = "lm") +
   #geom_bar(stat = "identity") +
   labs(x = "",
-       y = "Father-son correlation",
+       y = "Correlation",
        color = "") +
   annotate("text", x = 5, y = 0.6, label = "italic('Higher education')", size = 8, parse = TRUE) +
   theme_classic() +
@@ -1407,8 +1183,8 @@ mobility_lit.gg <- rels_lit_binned_cors %>%
   geom_line() +
   #stat_smooth(method = "lm") +
   #geom_bar(stat = "identity") +
-  labs(x = "Offspring birth year",
-       y = "Parent-child correlation") +
+  labs(x = "",
+       y = "Correlation") +
   annotate("text", x = 5, y = 0.6, label = "italic('Literacy')", size = 8, parse = TRUE) +
   theme_classic() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
@@ -1416,13 +1192,34 @@ mobility_lit.gg <- rels_lit_binned_cors %>%
         axis.title = element_text(size = 18))
 
 ####
+## Wealth
+####
+
+mobility_wealth.gg <- rels_wealth_binned %>%
+  filter(relationship == "father-son") %>%
+  mutate(trait = "wealth") %>%
+  ggplot(aes(x = byr1_bin, y = estimate, ymin = conf.low, ymax = conf.high, group = trait)) +
+  geom_pointrange() +
+  geom_line() +
+  #stat_smooth(method = "lm") +
+  #geom_bar(stat = "identity") +
+  labs(x = "Child birth year",
+       y = "Correlation") +
+  annotate("text", x = 5, y = 0.6, label = "italic('Wealth')", size = 8, parse = TRUE) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_text(size = 18))
+
+
+####
 ## plot
 ####
 
-mobility_noCorrect.gg <- plot_grid(mobility_occ.gg, mobility_edu.gg, mobility_lit.gg, nrow = 3, rel_heights = c(0.9, 1.1, 1), labels = c("(c)", "(d)", "(e)"), label_size = 18, label_x = c(-0.04, -0.04, -0.04))
+mobility_noCorrect.gg <- plot_grid(mobility_occ.gg, mobility_edu.gg, mobility_lit.gg, mobility_wealth.gg, nrow = 4, rel_heights = c(0.9, 1.1, 1.1, 1), labels = c("(d)", "(e)", "(f)", "(g)"), label_size = 18, label_x = c(-0.04, -0.04, -0.04, -0.04))
 
 
-ggsave("mobility_noCorrect.png", width = 6, height = 13, units = "in")
+#ggsave("mobility_noCorrect.png", width = 6, height = 13, units = "in")
 
 ```
 
@@ -1432,16 +1229,457 @@ ggsave("mobility_noCorrect.png", width = 6, height = 13, units = "in")
 ## Plot Fig S13
 
 ```{r}
-plot_grid(plot_grid(mobility_all_rels.gg, occStat_percentile.gg, nrow = 2, labels = c("(a)", "(b)"), label_size = 18), mobility_noCorrect.gg, nrow = 1, labels = c("", ""), rel_widths = c(1, 0.7))
+plot_grid(plot_grid(mobility_all_rels.gg, occStat_percentile.gg, wealth_percentile.gg, nrow = 3, labels = c("(a)", "(b)", "(c)"), rel_heights = c(1, 0.5, 0.5), label_size = 18, label_y = c(1,1.04,1.04)), mobility_noCorrect.gg, nrow = 1, labels = c("", ""), rel_widths = c(1, 0.7))
 
 ggsave("fig_s13.png", width = 12, height = 14, units = "in")
 
 ```
 
 
+# Plot Fig 2
+
+```{r confound panel a}
+#################################
+### Inset showing relationship between individual's occupational status and their father's wealth
+#################################
+confound_inset.gg <- ggplot(inds_wealth_1780, aes(x = wealth_fath, y = occ)) +
+  geom_point(alpha = 0.2, color = "#91bfdb") +
+  geom_smooth(method = "lm", se = F, color = "#08519c") +
+  labs(x = "Paternal wealth", y = "Occupational status", subtitle = "Across individuals") +
+  theme_classic() +
+  #annotate("text", x = -3, y = 5, label = "b = 0.43", size = 8) +
+  annotate("text", x = 6, y = 12, label = "italic(r)*' = 0.72'", size = 6, parse = T, color = "#08519c") +
+  theme(axis.text = element_text(size = 8),
+        axis.title = element_text(size = 12),
+        plot.title = element_text(size = 24, face = "bold"),
+        plot.subtitle = element_text(size = 14, face = "bold"),
+        #plot.background = element_rect(color = "black", fill = "transparent"),
+        plot.background = element_blank()) 
+
+
+#################################
+### Main plot showing the correlation in paternal wealth versus correlation in occupational status, across relationship classes
+#################################
+
+# get father-son df to lookup paternal wealth
+fathers_sons <- rels_occ %>%
+  filter(relationship == "father-son") %>%
+  mutate(pid_father = pid0,
+         pid_son = pid1)
+
+# assign paternal wealth info
+rels_occ_fam_wealth <- rels_occ %>%
+  filter(per1780 == 1) %>%
+  #filter(per1860 == 1) %>%
+  left_join(fathers_sons %>% dplyr::select(pid_father, pid_son), by = join_by(pid0 == pid_son)) %>%
+  rename(pid0_father = pid_father) %>%
+  left_join(fathers_sons %>% dplyr::select(pid_father, pid_son), by = join_by(pid1 == pid_son)) %>%
+  rename(pid1_father = pid_father) %>%
+  filter(!is.na(pid0_father) & !is.na(pid1_father)) %>%
+  left_join(wealth_long %>% dplyr::select(pid, lwealth), by = join_by(pid0_father == pid)) %>%
+  rename(pid0_father_wealth = lwealth) %>%
+  left_join(wealth_long %>% dplyr::select(pid, lwealth), by = join_by(pid1_father == pid)) %>%
+  rename(pid1_father_wealth = lwealth) %>%
+  filter(!is.na(pid0_father_wealth) & !is.na(pid1_father_wealth)) %>%
+  filter(relationship != "random") 
+  ## remove outliers if you wish
+  # filter(between(pid0_father_wealth, 
+  #                quantile(pid0_father_wealth, 0.25, na.rm = TRUE) - 1.5 * IQR(pid0_father_wealth, na.rm = TRUE),
+  #                quantile(pid0_father_wealth, 0.75, na.rm = TRUE) + 1.5 * IQR(pid0_father_wealth, na.rm = TRUE)) &
+  #          between(pid1_father_wealth, 
+  #                quantile(pid1_father_wealth, 0.25, na.rm = TRUE) - 1.5 * IQR(pid1_father_wealth, na.rm = TRUE),
+  #                quantile(pid1_father_wealth, 0.75, na.rm = TRUE) + 1.5 * IQR(pid1_father_wealth, na.rm = TRUE)))
+
+
+# get correlations for paternal wealth and occupational status, for each relationship class
+predict_occ_sum.df <- rels_occ_fam_wealth %>%
+  group_by(relationship) %>%
+  mutate(relationship = tolower(relationship)) %>%
+  summarise(cor_occ = cor.test(occ0, occ1, use = "complete.obs")$estimate[1],
+            cor_father_wealth = cor.test(pid0_father_wealth, pid1_father_wealth, use = "complete.obs")$estimate[1])
+  #mutate(type = "wealth_predicted") %>%
+  #left_join(rels_occ.df1) %>%
+  #mutate(cor_diff = cor - cor_predict)
+
+
+# fix relationship names
+predict.df <- relations.df %>%
+  mutate(relationship = tolower(relationship)) %>%
+  # fix some mixed labeling
+  left_join(predict_occ_sum.df %>% mutate(relationship = ifelse(relationship == "father-son", "child", ifelse(relationship == "grandson", "grandchild", ifelse(relationship == "sons", "full sibling", ifelse(relationship == "siblings-rem", "sibling-rem", relationship)))))) 
+
+
+# correlation between occStat correlation and paternal wealth correlation, across relationship classes
+cor.test(predict.df$cor_occ, predict.df$cor_father_wealth)
+
+set.seed(42) # for plot labels
+
+confound_main.gg <- ggplot() +
+  geom_point(data = predict.df, aes(x = cor_father_wealth, y = cor_occ, label = relationship_rename), size = 4) +
+  geom_smooth(data = predict.df, aes(x = cor_father_wealth, y = cor_occ), method = "lm", se = F, color = "black") +
+  #geom_smooth(data = predict.df[predict.df$relationship != "full sibling",], aes(x = cor_father_wealth, y = cor_occ), method = "lm", se = F, color = "red") +
+  geom_text_repel(data = predict.df, aes(x = cor_father_wealth, y = cor_occ, label = relationship_rename), size = 4, box.padding = 0.75, nudge_x = -.05) +
+  labs(x = "Correlation in paternal wealth", y = "Correlation in occupational status", title = "Example of confounding") +
+  annotate("text", label = "italic(r)*' = 0.91'", x = 0.2, y = 0.6, size = 8, parse = T) +
+  #annotate("text", label = "italic(r)*' = 0.9'", x = 0.15, y = 0.6, size = 14, parse = T, color = "red") +
+  theme_classic() +
+   theme(axis.text = element_text(size = 16),
+         axis.title = element_text(size = 18),
+         plot.title = element_text(size = 20, face = "bold"),
+         plot.subtitle = element_text(size = 22))
+
+
+
+confound.gg <- ggdraw(confound_main.gg) +
+  draw_plot(confound_inset.gg, x = 0.53, y = 0.11, 0.46, 0.4) 
+
+```
+
+
+```{r pseudo panel b}
+corrected_vs_uncorrected_cors <- ds_osd_m %>% 
+  dplyr::select(relationship_rename, n, cor_uncorr, lcl_uncorr, ucl_uncorr, cor_corr, lcl_corr, ucl_corr) %>%
+  pivot_longer(
+    cols = c(cor_uncorr, lcl_uncorr, ucl_uncorr, cor_corr, lcl_corr, ucl_corr),
+    names_to = c(".value", "type"), 
+    names_pattern = "(.*)_(.*)"
+  ) %>%
+  mutate(name=case_match(type,
+                         "uncorr" ~ "Clark (2023) estimation;\nsusceptible to pseudo-replication",
+                         "corr" ~ "Estimation corrected \nfor pseudo-replication")) %>%
+#  mutate(relationship_rename = fct_recode(relationship_rename, "Siblings once removed" = "Uncle-nephew", "Grandparent-grandchild" = "Grandparent-Grandchild")) %>%
+  mutate(n = ifelse(relationship_rename == "Parent-child", 1, ifelse(relationship_rename == "Grandparent-grandchild", 2, n))) %>%
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
+    mutate(n_adj = ifelse(relationship_rename == "Parent-child", 0.85, ifelse(relationship_rename == "Full siblings", 1.15, ifelse(relationship_rename == "Avuncular", 1.85, ifelse(relationship_rename == "Grandparent-grandchild", 2.15, n))))) 
+
+
+# get means for line
+line.df <- corrected_vs_uncorrected_cors %>%
+  group_by(name, n) %>%
+  summarise(mean_value = mean(cor))
+
+
+# for labels
+hjust_adjustment <- 0.05
+
+pseudo.gg <- corrected_vs_uncorrected_cors %>%
+  ggplot(aes(y=cor, ymin = lcl, ymax = ucl, x=n_adj, shape=name, color = name, group=name))+
+  geom_pointrange(size=1, position = position_dodge(width = 0.1)) +
+  geom_line(data = line.df, aes(x = n, y = mean_value, color = name, group = name, ymin = NULL, ymax = NULL), linewidth = 1) +
+  geom_text(data=corrected_vs_uncorrected_cors %>%
+                     group_by(n_adj) %>%
+                     filter(cor == max(cor)),
+                   aes(x = n_adj - 0.1, y = cor + hjust_adjustment, label=relationship_rename),
+                   colour="black",
+                   angle = 90,
+                    vjust = 0.3,
+            hjust = 0.05,
+            lineheight = 0.8)+
+  labs(x = "Degree of relatedness (n)", y = "Correlation in occupational status", title = "Statistical artifacts influence estimates") +
+  scale_x_continuous(breaks = 1:9) +
+  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1)), breaks = c(0.0, 0.2, 0.4, 0.6)) + 
+#  annotation_logticks(sides="l") +
+  coord_cartesian(clip = "off") +
+#  scale_y_log10() +
+  scale_shape_manual(values=c(17,16)) +
+  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
+  # single legend for color and shape
+  annotate("text", x = 0.72, y = 0.16, label = "Clark (2023) estimation;\nsusceptible to\npseudo-replication", hjust = 0, color = "#d8b365", size = 5) +
+  annotate("text", x = 2.6, y = 0.01, label = "Estimation corrected for\npseudo-replication", hjust = 0, color = "#5ab4ac", size = 5) +
+  annotate("segment", x = 3.4, xend = 3.89, y = 0.23,  yend = 0.34, color = "#d8b365", linewidth = 0.7, lty = "dotted") +
+  annotate("segment", x = 5.4, xend = 5.9, y = 0.05,  yend = 0.15, color = "#5ab4ac", linewidth = 0.7, lty = "dotted") +
+#  stat_brace(aes(c(0.8, 1.2), c(-0.12, -0.08)), outside = F, rotate = 180) +
+#  stat_brace(aes(c(1.8, 2.2), c(-0.12, -0.08)), outside = F, rotate = 180) +
+  theme_classic() +
+  theme(legend.title=element_blank(),
+        legend.position= "none",
+#        axis.text.x=element_blank(),
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 18),
+        strip.text = element_text(size = 16),
+        legend.text = element_text(size = 14),
+        legend.key.height = unit(2.5, "lines"),
+        legend.background = element_blank(),
+        #plot.title.position = "plot",
+        plot.title = element_text(size = 20, face = "bold", vjust = 9),
+#        legend.box.background = element_rect(linewidth = 1),
+        plot.margin = margin(0.8, 0.1, 0.2, 0.1, "in")) +
+  guides(color = guide_legend(override.aes = list(shape = c(17, 16), linetype = 0))) 
+
+#ggsave("fig_3.png", width = 7, height = 6.2, units = "in")
+#ggsave("fig_3.pdf", width = 7, height = 6.2, units = "in")
+
+
+```
+
+```{r mobility panel c}
+mobility_occ.gg <- results_df_occ %>%
+  filter(relationship == "father-son") %>%
+  ggplot() +
+  geom_line(data = means_occStat, aes(x = byr1_bin, y = estimate_mean, group = group)) +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
+  labs(x = "",
+       y = "Father-son") +
+#  annotate("text", x = 7, y = 0.35, label = "italic('Occupational status')", size = 5, parse = TRUE, hjust = 1) +
+  scale_y_continuous(labels = c("0.4", "", "0.6", "", "0.8"), breaks = c(0.4, 0.5, 0.6, 0.7, 0.8)) +
+  annotation_custom(grid::textGrob(expression("Occupational status"), x = 0.95, y = 0.9, hjust = 1, gp = grid::gpar(fontsize = 14))) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_blank(),
+        plot.margin = margin(5.5,5.5,5.5,0, "pt"))
+
+
+mobility_ded.gg <- results_df_ded %>%
+  filter(relationship == "father-son") %>%
+  ggplot() +
+  geom_line(data = means_ded, aes(x = byr1_bin, y = estimate_mean, group = group)) +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
+  labs(x = "Offspring birth year",
+       y = "Father-son") +
+#  annotate("text", x = 1, y = 0.05, label = "italic('Higher education')", size = 5, parse = TRUE, hjust = 0) +
+  annotation_custom(grid::textGrob(expression("Higher education"), x = 0.95, y = 0.9, hjust = 1, gp = grid::gpar(fontsize = 14))) +
+  theme_classic() +
+  scale_y_continuous(breaks = c(0, 0.2, 0.4, 0.6, 0.8, 1), labels = c("0.0", "", "0.4", "", "0.8", "")) +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_blank(),
+        plot.margin = margin(5.5,5.5,5.5,0, "pt"))
+
+
+mobility_lit.gg <- results_df_lit %>%
+  filter(Relationship == "parent-child") %>%
+  ggplot() +
+  geom_line(data = means_lit, aes(x = byr1_bin, y = estimate_mean, group = group)) +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
+  labs(x = "",
+       y = "Parent-child") +
+#  annotate("text", x = 1, y = 0, label = "italic('Literacy')", size = 5, parse = TRUE, hjust = 0) +
+  annotation_custom(grid::textGrob(expression("Literacy"), x = 0.95, y = 0.9, hjust = 1, gp = grid::gpar(fontsize = 14))) +
+   scale_y_continuous(limits = c(-0.1, 0.8), breaks = c(0, 0.2, 0.4, 0.6, 0.8), labels = c("0.0", "", "0.4", "", "0.8")) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_blank(),
+        plot.margin = margin(5.5,5.5,5.5,0, "pt"))
+
+
+mobility_wealth.gg <- results_df_wealth %>%
+  ggplot() +
+  geom_line(data = means_wealth, aes(x = byr1_bin, y = estimate_mean, group = group)) +
+  stat_summary(aes(x = byr1_bin, y = estimate), fun.data = custom_fun) +
+  labs(x = "Offspring birth year",
+       y = "Father-son") +
+#  annotate("text", x = 1, y = 0.2, label = "italic('Wealth')", size = 5, parse = TRUE, hjust = 0) +
+  annotation_custom(grid::textGrob(expression("Wealth"), x = 0.95, y = 0.9, hjust = 1, gp = grid::gpar(fontsize = 14))) +
+   scale_y_continuous(breaks = c(0, 0.2, 0.4, 0.6, 0.8), labels = c("0.0", "", "0.4", "", "0.8")) +
+  theme_classic() +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, size = 14),
+        axis.text.y = element_text(size = 14),
+        axis.title = element_blank(),
+        plot.margin = margin(5.5,5.5,5.5,0, "pt"))
+
+
+#################################
+### PLOT 
+#################################
+
+p1 <- plot_grid(mobility_occ.gg, mobility_lit.gg, mobility_ded.gg, mobility_wealth.gg, nrow = 2) 
+
+# add the title
+title <- ggdraw() + 
+  draw_label(
+    "Signals of change in social mobility",
+    size = 20,
+    fontface = 'bold',
+    x = 0,
+    hjust = 0
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 50)
+  )
+
+# add the y axis label
+ylabel <- ggdraw() + 
+  draw_label(
+    "Parent-child correlation",
+    size = 18,
+    hjust = 0.4,
+#    vjust = 2,
+    angle = 90,
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+# add the x axis label
+xlabel <- ggdraw() + 
+  draw_label(
+    "Child birth year",
+    size = 18,
+    x = 0.5,
+#    hjust = 0.5,
+#    vjust = 2,
+  ) +
+  theme(
+    plot.margin = margin(0, 0, 0, 0)
+  )
+
+p2 <- plot_grid(p1, xlabel,
+                nrow = 2, 
+                rel_heights = c(1, 0.1))
+
+p3 <- plot_grid(ylabel, p2,
+                ncol = 2, 
+                rel_widths = c(0.05, 1),
+                align = "hv")
+
+mobility.gg <- plot_grid(
+  title, p3,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.1, 1)
+)
+```
+
+```{r plot}
+fig2.gg <- plot_grid(confound.gg, pseudo.gg, mobility.gg, nrow = 3, ncol = 1, labels = c("(a)", "(b)", "(c)"), rel_heights = c(1,1.1,1), label_size = 20, label_x = 0.0, label_y = c(1.008, 0.965, 0.995))
+
+# add the title
+title_main <- ggdraw() + 
+  draw_label(
+    "Reanalyses of data from Clark (2023)",
+    size = 24,
+    fontface = 'bold',
+    x = 0,
+    hjust = 0,
+    vjust = 2
+  ) +
+  theme(
+    # add margin on the left of the drawing canvas,
+    # so title is aligned with left edge of first plot
+    plot.margin = margin(0, 0, 0, 49)
+  )
+
+plot_grid(
+  title_main, fig2.gg,
+  ncol = 1,
+  # rel_heights values control vertical title margins
+  rel_heights = c(0.08, 1)
+)
+
+ggsave("fig2.png", width = 8, height = 18, units = "in")
+ggsave("fig2.pdf", width = 8, height = 18, units = "in")
+```
+
+
+
+#  Fig 3
+
+Data underlying Figure 3b,c are prepared in `SZ2024.R`; the chunks below are for plotting.
+
+```{r fig 3b}
+fig3b_data <- read_tsv("data/fig3b_data.tsv")
+
+fig3b_data.gg <- fig3b_data %>%
+  dplyr::filter(!grepl("children", trait)) %>%
+  dplyr::filter(!grepl("partners", trait)) %>%
+  dplyr::filter(!grepl("osb_any", trait)) %>%
+  dplyr::filter(!grepl("ssb", trait)) %>%
+  dplyr::filter(!grepl("essb", trait)) %>%
+  dplyr::filter(!grepl("afs10", trait)) %>%
+  dplyr::filter(abs(STD_Genotype)<1) %>% 
+  mutate(trait=gsub("_", " ", trait)) %>%
+  # mutate(trait=ifelse(trait=="afs10", "First had sexual intercourse before age 10", trait)) %>%
+  mutate(trait=ifelse(trait=="afs13", "First had sexual intercourse before age 13", trait)) %>%
+  mutate(trait=ifelse(trait=="Frequency of solariumsunlamp use*", "Frequency of solarium [tanning bed]/sunlamp use*", trait)) %>%
+  mutate(trait=ifelse(trait=="essb", "Song & Zhang's 'Exclusively Same-sex Sexual Behavior' phenotype", trait)) %>%
+  mutate(trait=ifelse(trait=="ssb", "Ever had same-sex sexual intercourse", trait)) %>%
+  mutate(trait=ifelse(trait=="sb any", "Ever had sexual intercourse", trait)) %>%
+  mutate(trait=ifelse(trait=="risk taking", "Risk-taking behavior", trait)) %>%
+  mutate(trait=ifelse(p_value<0.05/19, paste0(trait, "*"), trait)) %>%
+  mutate(ci_lower=STD_Genotype-1.96*STD_Genotype_SE, 
+         ci_upper=STD_Genotype+1.96*STD_Genotype_SE) %>%
+  # mutate(highlight=ifelse(grepl("risk taking", trait), "a", ifelse(grepl("[*]", trait), "c", "b"))) %>%
+  mutate(highlight=ifelse(grepl("Risk-taking behavior", trait), "a", "b")) %>%
+  ggplot(aes(x=STD_Genotype, y=reorder(trait, STD_Genotype), colour=highlight))+
+  geom_vline(xintercept=0, linewidth = 0.5, colour="grey60")+
+  geom_point()+
+  scale_colour_manual(values=c("#0097a7", "#0044A7"))+
+  geom_text(aes(label=trait), nudge_y=0.4, size=5)+
+  # geom_errorbar(aes(xmax=STD_Genotype+STD_Genotype_SE, xmin=STD_Genotype-STD_Genotype_SE), width=0.25)+
+  geom_errorbar(aes(xmax=ci_upper, xmin=ci_lower), width=0.25)+
+  # scale_x_continuous(breaks=round(seq(-0.3, 0.4, by=0.1), digits=2), limits=c(-0.31,0.29))+
+  scale_y_discrete(expand=c(0.01, 0))+
+  xlab("Partial genetic correlation between BSB in males and number of children")+
+  # ylab(NULL)+
+  ylab("**Measure X**<br>measure for which genetic correlations are being adjusted")+
+  coord_cartesian(clip = 'off') +
+  theme_classic()+
+  theme(axis.text.y=element_blank(),
+        axis.ticks.y=element_blank(),
+#        axis.title.x=element_text(size=18),
+#        axis.title.y=element_text(size=18),
+        axis.text.x=element_text(size=16),
+        axis.title = element_markdown(size = 18),
+        legend.position="none")
+
+
+fig3b <- ggdraw(fig3b_data.gg) +
+  draw_image("data/path_3b.png", x = -0.05, y = 0.35, width = 0.6, height = 0.6)
+```
+
+```{r fig 3c}
+fig3c_data <- read_tsv("data/fig3c_data.tsv")
+
+fig3c <- fig3c_data %>% 
+  ggplot(aes(x=forcats::fct_rev(Age_first_had_sexual_intercourse), y=prop))+
+  geom_col()+
+  coord_flip()+
+  geom_hline(yintercept=0.0218, linetype="dashed", colour="grey60")+
+  annotate("segment", yend = 0.0218, x = 4.5, xend = 4.5, y = 0.08, colour="black",
+           arrow = arrow(type = "closed", length = unit(0.02, "npc")))+
+  annotate("text", y = 0.08, x=4.5, colour="black", hjust=0, size=6, label="Fraction of all males in sample\n classified as BSB (0.022)")+
+  geom_text(aes(label=paste0("N=", scales::comma(ntot))), size=5, angle=0, hjust= -0.1)+
+  ylab("Fraction of males in age group classified as BSB")+
+  xlab("Age first had sexual intercourse (self-reported)")+
+  theme_classic()+
+  scale_x_discrete(expand=c(0.1,0))+
+  scale_y_continuous(expand=c(0,0),  position="right", breaks=seq(0,0.25, by=0.05), limits=c(0,0.28), )+
+  theme(
+        axis.title.x=element_markdown(size=18, margin = margin(10,10,10,10)),
+        axis.text.x=element_text(size=16),
+        axis.title.y=element_text(size=18),
+        axis.text.y=element_text(size=16, angle = 45, vjust = 0),
+        legend.position="none",
+        plot.margin = margin(10,10,20,30))
+```
+
+```{r plot}
+fig3a <- ggdraw() +
+  draw_image("data/path_3a.png")
+
+top_row <- plot_grid(fig3a, fig3c, nrow = 1, rel_widths = c(0.8,1), labels = c("(a)", "(c)"), label_size = 20)
+
+#ggsave("fig3.png")
+
+plot_grid(top_row, fig3b, nrow = 2, rel_heights = c(0.8, 1), labels = c("", "(b)"), label_size = 20, label_y = 1.05)
+
+#ggsave("fig3.png", width = 14, height = 13, units = "in")
+#ggsave("fig3.pdf", width = 14, height = 13, units = "in")
+```
+
+
+
+
+
 # Fig S1
 
-## Father-son correlations (Fig 4)
+Here we explore the tests of environmental influences on social status presented in Clark (2023) Figures 3 and 4.
+
+## Father-son correlations (C23 Fig 4)
+
+First we see how father-son correlations in status measures varies with age at fathers death.
 
 ```{r tidy}
 
@@ -1486,12 +1724,13 @@ father_son_wealth_binned <- father_son_wealth %>%
 ```{r plot}
 
 # Define colors and shapes for the measures
-color_map <- c("Education" = "#E3211C", "Occupation" = "black", "OccupationWealth" = "grey", "EducationWealth" = "pink")
-shape_map <- c("Education" = 19, "Occupation" = 15, "OccupationWealth" = 17, "EducationWealth" = 18)  # 19 = circle, 15 = square, 17 = triangle
+color_map <- c("Education - Education" = "#E3211C", "Occupation - Occupation" = "black", "Occupation - Wealth" = "grey", "Education - Wealth" = "pink")
+shape_map <- c("Education - Education" = 19, "Occupation - Occupation" = 15, "Occupation - Wealth" = 17, "Education - Wealth" = 18)  # 19 = circle, 15 = square, 17 = triangle
 
 
 father_son.gg <- father_son_wealth_binned %>%
   filter(measure != "Wealth") %>%
+  mutate(measure = fct_recode(measure, `Education - Education` = "Education", `Occupation - Occupation` = "Occupation", `Occupation - Wealth` = "OccupationWealth", `Education - Wealth` = "EducationWealth")) %>%
   ggplot(aes(x = age_fathers_death, y = cor, color = measure, shape = measure, group = measure)) +
   geom_pointrange(aes(ymin = lowCI, ymax = highCI), position = position_dodge(width = 0.1), size = 1) +
   geom_line(position = position_dodge(width = 0.1)) +
@@ -1509,20 +1748,9 @@ father_son.gg <- father_son_wealth_binned %>%
 ```
 
 
-## Maternal / paternal influence (Fig 3)
+## Maternal / paternal influence (C23 Fig 3)
 
-```{r explore}
-ggplot(wealth, aes(x = lwealthmgf, y = lwealthpgf)) +
-  geom_point()
-
-cor.test(wealth$lwealthmgf, wealth$lwealthpgf, use = "complete.obs")
-
-ggplot(wealth, aes(x = occmgf, y = occpgf)) +
-  geom_point()
-
-cor.test(wealth$occmgf, wealth$occpgf, use = "complete.obs")
-```
-
+Here we show that maternal and paternal effects on offspring status measures and wealth are statistically indistinguishable when data used across these three regressions are identical.
 
 
 ```{r complete data df}
@@ -1576,24 +1804,48 @@ coefs_wealth.gg <- ggplot(coefs_all.df, aes(x = lwealthpgf, color = dataset)) +
 ## get model coefficients from trait ~ father + mother, using complete df (all_there)
 ####
 
-# higher education
+#### higher education
 ded_coef.lm <- lm(dedgc ~ dedpgf + dedmgf, data = all_there)
 summary(ded_coef.lm)
-ded_coef_sum <- tidy(ded_coef.lm, conf.int = T) %>%
+
+# CIs not clustered 
+# ded_coef_sum <- tidy(ded_coef.lm, conf.int = T) %>%
+#  mutate(trait = "Education")
+
+# clustered CIs, like in Clark Fig 3. Clustering on father
+ded_coef_sum <- tidy(coeftest(ded_coef.lm, vcov = vcovCL, cluster = ~ pidpgf), conf.int = T) %>%
   mutate(trait = "Education")
+
 #plot_coef_ci(lm(dedgc ~ dedpgf + dedmgf, data = all_there))
 
-# occupational status
+
+
+#### occupational status
 occ_coef.lm <- lm(occgc ~ occpgf + occmgf, data = all_there)
 summary(occ_coef.lm)
-occ_coef_sum <- tidy(occ_coef.lm, conf.int = T) %>%
+
+# CIs not clustered
+#occ_coef_sum <- tidy(occ_coef.lm, conf.int = T) %>%
+#  mutate(trait = "Occupation")
+
+# clustered CIs, like in Clark Fig 3. Clustering on father
+occ_coef_sum <- tidy(coeftest(occ_coef.lm, vcov = vcovCL, cluster = ~ pidpgf), conf.int = T) %>%
   mutate(trait = "Occupation")
+
 # plot_coef_ci(lm(occgc ~ occpgf + occmgf, data = all_there))
 
-# wealth
+
+
+#### wealth
 wealth_coef.lm <- lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = all_there)
 summary(wealth_coef.lm)
-wealth_coef_sum <- tidy(wealth_coef.lm, conf.int = T) %>%
+
+# CIs not clustered
+#wealth_coef_sum <- tidy(wealth_coef.lm, conf.int = T) %>%
+#  mutate(trait = "Wealth")
+
+# clustered CIs, like in Clark Fig 3. Clustering on father
+wealth_coef_sum <- tidy(coeftest(wealth_coef.lm, vcov = vcovCL, cluster = ~ pidpgf), conf.int = T) %>%
   mutate(trait = "Wealth")
 #plot_coef_ci(lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = all_there))
 
@@ -1609,106 +1861,13 @@ coefs.df <- bind_rows(ded_coef_sum, occ_coef_sum, wealth_coef_sum) %>%
   mutate(parent = ifelse(term %in% c("dedpgf", "occpgf", "lwealthpgf"), "Father (proxy)", "Mother (proxy)"))
 ```
 
-```{r replicated}
-####
-## get model coefficients from trait ~ father + mother, using complete df (all_there)
-####
-
-# higher education
-mean(wealth$dedpgf, na.rm = T)
-var(wealth$occpgf, na.rm = T)
-
-ded_coef.lm <- lm(dedgc ~ dedpgf + dedmgf, data = wealth)
-summary(ded_coef.lm)
-ded_coef_sum <- tidy(ded_coef.lm, conf.int = T) %>%
-  mutate(trait = "Education")
-#plot_coef_ci(lm(dedgc ~ dedpgf + dedmgf, data = all_there))
-
-# occupational status
-mean(wealth$occpgf, na.rm = T)
-var(wealth$occpgf, na.rm = T)
-var(wealth$occmgf, na.rm = T)
-
-occ_coef.lm <- lm(occgc ~ occpgf + occmgf, data = wealth)
-summary(occ_coef.lm)
-occ_coef_sum <- tidy(occ_coef.lm, conf.int = T) %>%
-  mutate(trait = "Occupation")
-# plot_coef_ci(lm(occgc ~ occpgf + occmgf, data = all_there))
-
-# wealth
-wealth_coef.lm <- lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = wealth)
-summary(wealth_coef.lm)
-wealth_coef_sum <- tidy(wealth_coef.lm, conf.int = T) %>%
-  mutate(trait = "Wealth")
-#plot_coef_ci(lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = all_there))
-
-
-
-
-####
-## Tidy for plotting
-####
-
-coefs.df <- bind_rows(ded_coef_sum, occ_coef_sum, wealth_coef_sum) %>%
-  filter(term != "(Intercept)") %>%
-  mutate(parent = ifelse(term %in% c("dedpgf", "occpgf", "lwealthpgf"), "Father (proxy)", "Mother (proxy)"))
-```
-
-```{r corrected pseudorep}
-nrow(wealth %>% distinct(nid))
-
-matpat_occ_pseud <- data.frame()
-
-set.seed(124)
-
-for(i in 1:1000){
-  
-  matpat_occ_pseud_temp <- wealth %>%
-    group_by(nid) %>%
-    slice_sample(n=1) 
-  
-  occ_coef.lm <- lm(occgc ~ occpgf + occmgf, data = matpat_occ_pseud_temp)
-  ded_coef.lm <- lm(dedgc ~ dedpgf + dedmgf, data = matpat_occ_pseud_temp)
-  wealth_coef.lm <- lm(lwealthgc ~ lwealthpgf + lwealthmgf, data = matpat_occ_pseud_temp)
-  
-  occ_coef_tidy <- tidy(occ_coef.lm) %>%
-    filter(term != "(Intercept)") %>%
-    mutate(measure = "Occupational Status",
-           run = i)
-  
-  ded_coef_tidy <- tidy(ded_coef.lm) %>%
-    filter(term != "(Intercept)") %>%
-    mutate(measure = "Higher Education",
-           run = i)
-  
-  wealth_coef_tidy <- tidy(wealth_coef.lm) %>%
-    filter(term != "(Intercept)") %>%
-    mutate(measure = "Wealth",
-           run = i)
-  
-  matpat_occ_pseud <- bind_rows(matpat_occ_pseud, 
-                                occ_coef_tidy,
-                                ded_coef_tidy,
-                                wealth_coef_tidy)
-}
-
-matpat_occ_pseud %>%
-  mutate(matpat = ifelse(term %in% c("occmgf", "dedmgf", "lwealthmgf"), "Maternal", "Paternal")) %>%
-  group_by(measure, matpat) %>%
-  summarise(coef = mean(estimate), 
-             lcl_corr = quantile(estimate, 0.025),  # Lower bound of the CI
-             ucl_corr = quantile(estimate, 0.975)) %>%  # Upper bound of the CI
-  ggplot(aes(x = measure, y = coef, ymin = lcl_corr, ymax = ucl_corr, color = matpat)) +
-  geom_pointrange(position = position_dodge(width = 0.2))
-
-```
 
 ```{r plot}
 # Define colors for the parent categories
 coefs_color_map <- c("Father (proxy)" = "#E4211C", "Mother (proxy)" = "#377EB8")
 
 coefs.gg <- ggplot(coefs.df, aes(x = trait, y = estimate, color = parent, shape = parent)) +
-  geom_pointrange(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.1), size = 1) +
+  geom_pointrange(aes(ymin = conf.low, ymax = conf.high), position = position_dodge(width = 0.2), size = 1) +
   scale_color_manual(values = coefs_color_map) +  # use the color map here
   scale_shape_manual(values = c("Father (proxy)" = 17, "Mother (proxy)" = 16)) +
   labs(y = "Coefficient estimate", color = "", shape = "", x = "Measure") +
@@ -1746,6 +1905,7 @@ ggsave("fig_s1.png", width = 7.5, height = 9, units = "in")
 
 # Fig S2 - Heterogeneity and N
 ```{r fig S2a}
+# Comparing the “lineage-agnostic” correlations in occupational status (1780-1859) that (1) relies on (orange lines) with the distributions of lineage-specific correlations and their medians (blue lines)
 fig_s2a_dat <- rels_occ %>%
   dplyr::filter(per1780==1 & relationship!="random") %>%
   group_by(relationship, nid) %>%
@@ -1767,13 +1927,8 @@ fig_s2a_dat <- rels_occ %>%
               dplyr::select(relationship_rename, cor, group)) %>%
   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec))
 
-# fig_s2a_dat <- read.csv(paste0(data_loc, "fig3s_dat.csv")) %>%
-#   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec))
-# 
-# fig_s2a_dat$group <- gsub("\\\\n", "\n", fig_s2a_dat$group)
   
 
-# Fig. 3a
 occstat_cor_dists <- rels_occ %>%
   dplyr::filter(per1780==1 & relationship!="random") %>%
   group_by(relationship, nid) %>%
@@ -1787,7 +1942,7 @@ occstat_cor_dists <- rels_occ %>%
 
 nudge <- 0.2
   
-fig3a.gg <- occstat_cor_dists %>%
+figS2a.gg <- occstat_cor_dists %>%
   mutate(cor_occ=cor) %>%
   ggplot(aes(x=cor_occ)) + 
   facet_wrap(~relationship_rename, 
@@ -1831,7 +1986,8 @@ fig3a.gg <- occstat_cor_dists %>%
         legend.position="none")
 ```
 
-```{r fig S2b}
+```{r fig S2bc}
+# Lineage-specific correlations in occupational status for first-degree relatives are associated with the representation of the lineage
 osd_means <- occstat_cor_dists %>% 
     # dplyr::filter(!is.na(cor)) %>%
     dplyr::filter(relationship_rename %in% c("Full siblings", "Parent-child")) %>%
@@ -1841,7 +1997,7 @@ osd_means <- occstat_cor_dists %>%
   mutate(relationship_rename=paste0(relationship_rename, "\n correlation in occupational status"))
 
 # Fig. 3b- lineage-specific cor vs n for 1st degree relatives
-fig3b.gg <- occstat_cor_dists %>% 
+figS2bc.gg <- occstat_cor_dists %>% 
   # dplyr::filter(!is.na(cor)) %>%
   dplyr::filter(relationship_rename %in% c("Full siblings", "Parent-child")) %>%
   mutate(gp=ifelse(n.x<30, "Median of lineages \n with <30 pairs", "Median of lineages \n with ≥30 pairs")) %>% 
@@ -1889,14 +2045,14 @@ ylab("Number of pairs in lineage")+
 ```
 
 ```{r plot S2}
-fig3 <- plot_grid(fig3a.gg, fig3b.gg, ncol = 2)
+figS2 <- plot_grid(figS2a.gg, figS2bc.gg, ncol = 2)
 
-ggdraw(fig3) +
+ggdraw(figS2) +
   draw_label("(a)", x = 0.015, y = 0.99, size = 18) +
   draw_label("(b)", x = 0.54, y = 0.99, size = 18) +
   draw_label("(c)", x = 0.54, y = 0.49, size = 18)
 
-ggsave("fig_s2.png", width = 12, height = 12, units = "in")
+#ggsave("fig_s2.png", width = 12, height = 12, units = "in")
 ```
 
 
@@ -1904,7 +2060,7 @@ ggsave("fig_s2.png", width = 12, height = 12, units = "in")
 
 Plotting the distributions of surname-specific correlations 
 ```{r}
-# Define a custom correlation function
+# custom correlation function
 safe_cor <- function(x, y) {
   # Remove pairs with NA or non-finite values
   clean_data <- na.omit(data.frame(x, y))
@@ -2141,7 +2297,7 @@ rels_sum_all <- rels_sum %>%
   
   
 ggplot(rels_lineage_all, aes(x = value)) +
-  geom_histogram(binwidth = 0.1) +  # You might want to specify a binwidth
+  geom_histogram(binwidth = 0.1) +  
   geom_vline(data = rels_lineage_all %>%
                group_by(relationship_rename, name) %>%
                summarise(median = median(value, na.rm = TRUE)),
@@ -2170,41 +2326,12 @@ ggsave("fig_s3.png", height = 12, width = 18, units = "in")
 ```
 
 # Fig S4 - Substructure
-```{r Simpsons}
-####
-## Plotting surnames with negative correlations
-####
 
-
-lineages_occ_1780_neg.df <- rels_occ %>%
-  filter(relationship == "father-son") %>%
-  filter(per1780 == 1) %>%
-  mutate(nid = as.factor(nid)) %>%
-  group_by(nid) %>%
-  filter(n() > 2) %>%
-  summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate) %>%
-  filter(cor < 0)
-
-neg_cors.gg <- rels_occ %>%
-  filter(relationship == "father-son") %>%
-  filter(per1780 == 1) %>%
-#  filter(nid %in% lineages_occ_1780_neg.df$nid) %>%
-  filter(nid %% 3 == 0) %>%
-#  summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate)
-  ggplot() +
-  geom_point(aes(x = occ0, y = occ1, color = as.factor(nid)), alpha = 0.3) +
-  geom_smooth(aes(x = occ0, y = occ1, color = as.factor(nid)), method = "lm", se = F) +
-  geom_smooth(aes(x = occ0, y = occ1), method = "lm", linetype = "dashed", color = "black", se = F) +
-  labs(x = "Father occupational status", y = "Son occupational status", title = "Population stratification leads to spurious correlations", subtitle = "Among lineages") +
-  theme_clark() +
-  theme(legend.position = "none",
-        plot.title = element_text(size = 20),
-        plot.subtitle = element_text(size = 18))
-```
-
-## Fig S4
+Variation and substructure among and within surname lineages.
 
 ```{r among lineage}
+# Plot 4th cousin relationships in occupational status for conditioning on surname lineage (nid)
+
 jed_strat_c.gg <- rels_occ %>%
   filter(relationship == "cousin4") %>%
   filter(per1780 == 1) %>%
@@ -2251,6 +2378,7 @@ jed_strat_c.gg <- rels_occ %>%
 ```
 
 ```{r surname 1436}
+# Plot correlation in occStat across degree of relatedness, for one specific lineage
 surname_1436_all.gg <- rels_occ %>%
   filter(per1780 == 1) %>%
   filter(nid == 1436) %>%
@@ -2272,8 +2400,8 @@ surname_1436_all.gg <- rels_occ %>%
   scale_x_continuous(breaks = 1:9) +
   scale_y_continuous(expand = expansion(mult = c(0.01, 0.05)), limits = c(NA, 0.85)) +
   labs(x = "Degree of relatedness (n)", y = "Correlation in occupational status", subtitle = "Surname 1436") +
-  geom_brace(aes(c(0.8, 1.2), c(0.42, 0.44)), inherit.data = F, rotate = 180) +
-  geom_brace(aes(c(1.8, 2.2), c(0.42, 0.44)), inherit.data = F, rotate = 180) +
+  #geom_brace(aes(c(0.8, 1.2), c(0.42, 0.44)), inherit.data = F, rotate = 180) +
+  #geom_brace(aes(c(1.8, 2.2), c(0.42, 0.44)), inherit.data = F, rotate = 180) +
   theme_clark() +
   theme(legend.position = "none",
         plot.subtitle = element_text(size = 18),
@@ -2284,6 +2412,10 @@ surname_1436_all.gg <- rels_occ %>%
 ```
 
 ```{r within lineage}
+# Plot sublineage structure within a select group of lineages
+
+
+# get list of lineages with strong 4th cousin correlations in occStat
 high_cor_nids <- rels_occ %>%
   filter(per1780 == 1) %>%
   filter(relationship == "cousin4") %>%
@@ -2348,7 +2480,11 @@ ggsave("fig_s4.png", width = 8.5, height = 18, units = "in")
 
 
 # Fig S5 - Cor ~ N
+
+Relationship between lineage-specific correlation in occupational status and lineage size, across relative types.
+
 ```{r}
+# calculate occStat correlations and sample size for each relationship type in each lineage
 occstat_cor_dists <- rels_occ %>%
   dplyr::filter(per1780==1 & relationship!="random") %>%
   group_by(relationship, nid) %>%
@@ -2357,12 +2493,14 @@ occstat_cor_dists <- rels_occ %>%
   summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1], 
           n=max(n), 
           occstat=mean(occ0, na.rm=T)) %>%
-  merge(relations.df, by.x="relationship", by.y="relationship_rels_occ")
+  merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>%
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec))
 
 # data frame of spearman correlation between lineage-specific n/occstat correlation
 occstat_rho_vs_n <- occstat_cor_dists %>% 
   group_by(relationship_rename) %>% 
-  summarise(cor1=round(cor(cor, n.x, method="spearman", use="complete.obs"), 2), min_cor=min(cor, na.rm=T), max_n=max(n.x))
+  summarise(cor1=round(cor(cor, n.x, method="spearman", use="complete.obs"), 2), min_cor=min(cor, na.rm=T), max_n=max(n.x)) %>%
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec))
 
 
 occstat_cor_dists %>%
@@ -2392,6 +2530,8 @@ ggsave("fig_s5.png", width = 11, height = 10, units = "in")
 
 # Fig S6
 
+Distributions of familial status correlations stratified by sublineage.
+
 ```{r}
 cor_by_pidf <- rels_occ %>%
     dplyr::filter(per1780==1 & relationship !="random") %>%
@@ -2401,9 +2541,10 @@ cor_by_pidf <- rels_occ %>%
     summarise(cor = cor.test(occ0, occ1, use = "complete.obs")$estimate[1],
               n=n())
 
-fig_s6 <- cor_by_pidf %>% 
+cor_by_pidf %>% 
   merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>%
   dplyr::filter(!grepl("son|Grand", relationship_rename)) %>%
+  mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
   ggplot(aes(x=cor))+
   geom_histogram(alpha=0.8)+
   geom_vline(xintercept=0, linetype="dashed")+
@@ -2414,131 +2555,123 @@ fig_s6 <- cor_by_pidf %>%
 
 # Fig S8
 
+Effect of pseudoreplication in Clark (2023) on variance and covariance estimates.
+
 ```{r}
-# variance and covariance including replicated records
+# variance and covariance from Clark's data
 pr_ss <- rels_occ %>%
-    dplyr::filter(per1780==1 & relationship!="random") %>% 
+  dplyr::filter(per1780==1 & relationship!="random") %>% 
   group_by(relationship) %>% 
   summarise(cov=cov(occ0, occ1, use="complete.obs"), 
             var0=var(occ0, na.rm=T),
             var1=var(occ1, na.rm=T))
 
-# variance and covariance including only unique records
-set.seed(121)
-no_pr_ss <- rels_occ %>%
-    dplyr::filter(per1780==1 & relationship!="random") %>% 
-  group_by(relationship, pid0) %>% 
-  slice_sample(n=1) %>% 
-  group_by(relationship, pid1) %>% 
-  slice_sample(n=1) %>% 
-  group_by(relationship) %>% 
-  summarise(cov=cov(occ0, occ1, use="complete.obs"),
-            var0=var(occ0, na.rm=T),
-            var1=var(occ1, na.rm=T))
 
-fig_s8_dat  <- bind_rows(pr_ss %>% mutate(data="all pairs"), 
-                         no_pr_ss %>% mutate(data="unique individuals")) %>%
-  merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>% 
-  dplyr::select(relationship_rename, n, cov, var0, data) %>%
-  mutate(n = ifelse(relationship_rename == "Parent-child", 1, ifelse(relationship_rename == "Grandparent-grandchild", 2, n))) %>%
+# variance/covariance after bootstrapping
+figS8_data_new1 <- ds_occstat %>%
+  dplyr::select(-n) %>%
+  merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>%
+#  mutate(relationship_rename = fct_recode(relationship_rename,
+#                                          "Siblings once removed" = "Uncle-nephew",
+#                                          "Grandparent-grandchild" = "Grandparent-Grandchild")) %>%
+  mutate(n = ifelse(relationship_rename == "Parent-child", 1,
+                    ifelse(relationship_rename == "Grandparent-grandchild", 2, n))) %>%
   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
-    mutate(n_adj = ifelse(relationship_rename == "Parent-child", 0.85, ifelse(relationship_rename == "Full siblings", 1.15, ifelse(relationship_rename == "Siblings once removed", 1.85, ifelse(relationship_rename == "Grandparent-grandchild", 2.15, n)))))
+  mutate(n_adj = ifelse(relationship_rename == "Parent-child", 0.85, 
+                        ifelse(relationship_rename == "Full siblings", 1.15, 
+                               ifelse(relationship_rename == "Avuncular", 1.85, 
+                                      ifelse(relationship_rename == "Grandparent-grandchild", 2.15, n)))))
 
-fig_s8a <- fig_s8_dat %>% 
-  #pivot_wider(values_from=cov, names_from=gp) %>% 
-  ggplot(aes(x=n_adj, y=cov, colour=data, group=relationship_rename))+
-  geom_point(size=3)+
-  geom_line(linetype="dashed", colour="black")+
-  # geom_abline(alpha=0.5)+
-  theme_classic()+
-  geom_text(data=fig_s8_dat %>%
-                     group_by(n_adj) %>%
-                     filter(cov == max(cov)),
-                   aes(y = cov + 10, label=relationship_rename),
-                   colour="black",
-                   angle = 90,
-                    vjust = 0.3,
+# load from file
+# figS8_data_new1 <- read.csv("fig_s8_bootstrap_data.tsv", sep = "\t") %>%
+#   mutate(cov = as.numeric(cov),
+#          var = as.numeric(var),
+#          cor = as.numeric(cor))
+
+# covariance plot
+s8_cov <- figS8_data_new1 %>%
+  ggplot(aes(x=n_adj, y=cov, group=relationship_rename))+
+  geom_jitter(alpha=0.3, colour="#5ab4ac")+
+  geom_boxplot(alpha=0)+
+  geom_point(data=merge(pr_ss %>% dplyr::rename(cov_na=cov), 
+                        figS8_data_new1, by="relationship"), 
+             aes(y=cov_na), 
+             colour="#d8b365", shape=17, size=6)+
+  geom_text(data=figS8_data_new1 %>%
+              group_by(n_adj) %>%
+              filter(cov == max(cov)),
+            aes(y = (cov + 5), label=relationship_rename),
+            colour="black",
+            angle = 90,
+            vjust = 0.3,
             hjust = 0,
             lineheight = 0.8)+
-  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n<=3),
-  #                 aes(label=relationship_rename),
-  #                 colour="black", min.segment.length=5, nudge_y=-5)+
-  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & n>3),
-  #                 aes(label=relationship_rename),
-  #                 colour="black", min.segment.length=5, nudge_y=5)+
-  # scale_x_continuous(limits=c(30, 160))+
-  coord_cartesian(clip = "off") +
-  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
-  geom_brace(aes(c(0.8, 1.2), c(2, 10)), inherit.data = F, rotate = 180) +
-  geom_brace(aes(c(1.8, 2.2), c(2, 10)), inherit.data = F, rotate = 180) +
-  scale_x_continuous(breaks=1:9) +
-  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
-  # single legend for color and shape
-  xlab("Degree of relatedness (n)") +
-  annotate("text", x = 3, y = 25, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
-  annotate("text", x = 1, y = 90, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
-  xlab("")+
-  ylab("Covariance")+
-  theme(legend.position="none",
-        panel.grid = element_blank(),
-      axis.text = element_text(size = 14),
-      axis.title = element_text(size = 16),
-      legend.title = element_text(size = 18),
-      strip.text = element_text(size = 16),
-      legend.text = element_text(size = 16),
-      axis.title.x = element_blank(),
-      plot.margin = margin(1.2, 0.1, 0, 0.1, "in"))
+  #geom_brace(aes(c(0.8, 1.2), c(-100, -80)), inherit.data = F, rotate = 180) +
+  #geom_brace(aes(c(1.8, 2.2), c(-100, -80)), inherit.data = F, rotate = 180) +
+  annotate("text", x = 0.8, y = 400, 
+           label = "Clark (2023) estimation;\nsusceptible to pseudo-replication", 
+           hjust = 0, color = "#d8b365", size = 6) +
+  annotate("text", x = 0.8, y = 0, 
+           label = "Estimation corrected for\npseudo-replication", 
+           hjust = 0, color = "#5ab4ac", size = 6) +
+  theme_clark()+
+  scale_x_continuous(breaks = 1:9) +
+  scale_y_continuous(limits=c(-100, 500)) +
+  xlab("Degree of relatedness (n)")+
+  ylab("Sample covariance")
 
-fig_s8b <- fig_s8_dat %>% 
-  #pivot_wider(values_from=cov, names_from=gp) %>% 
-  ggplot(aes(x=n_adj, y=var0, colour=data, group=relationship_rename))+
-  geom_point(size=3)+
-  geom_line(linetype="dashed", colour="black")+
-  # geom_abline(alpha=0.5)+
-  theme_classic()+
-  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n<=4 | n==6)),
-  #                 aes(label=relationship_rename),
-  #                 colour="black", min.segment.length=5, nudge_y=-1, nudge_x=0.5)+
-  # geom_text_repel(data=fig_s8_dat %>% dplyr::filter(data=="unique individuals" & (n==5 | n>6)),
-  #                 aes(label=relationship_rename),
-  #                 colour="black", min.segment.length=5, nudge_y=5)+
-  # scale_x_continuous(limits=c(30, 160))+
-  geom_brace(aes(c(0.8, 1.2), c(200, 205)), inherit.data = F, rotate = 180) +
-  geom_brace(aes(c(1.8, 2.2), c(200, 205)), inherit.data = F, rotate = 180) +
-  scale_x_continuous(breaks=1:9) +
-  scale_y_continuous(expand = expansion(mult = c(0.02, 0.1))) + 
-  #scale_y_continuous(limits=c(200, 310)) +
-  scale_color_manual(values = c("#d8b365", "#5ab4ac")) +  # divergent color scheme
-  # single legend for color and shape
-  xlab("Degree of relatedness (n)") +
-#  annotate("text", x = 0.5, y = 305, label = "using all pairs \n as in Clark (2023) estimation", hjust = 0, color = "#d8b365", size = 6) +
-#  annotate("text", x = 2.5, y = 225, label = "using only \nunique individuals", hjust = 0, color = "#5ab4ac", size = 6) +
-  xlab("Degree of relationship (n)")+
-  ylab("Variance")+
-  theme(legend.position="none",
-        panel.grid = element_blank(),
-      axis.text = element_text(size = 14),
-      axis.title = element_text(size = 16),
-      legend.title = element_text(size = 18),
-      strip.text = element_text(size = 16),
-      legend.text = element_text(size = 16),
-      plot.margin = margin(0, 0.1, 0, 0.1, "in"))
+# variance plot
+s8_var <- figS8_data_new1 %>%
+  ggplot(aes(x=n_adj, y=var, group=relationship_rename))+
+  geom_jitter(alpha=0.3, colour="#5ab4ac")+
+  geom_boxplot(alpha=0)+
+  geom_point(data=merge(pr_ss %>% 
+                          mutate(var_na=sqrt(var0)*sqrt(var1)), 
+                        figS8_data_new1, by="relationship"), aes(y=var_na), 
+             colour="#d8b365", shape=17, size=6)+
+  geom_text(data=figS8_data_new1 %>%
+              group_by(n_adj) %>%
+              filter(var == max(var)),
+            aes(y = (var + 10), label=relationship_rename),
+            colour="black",
+            angle = 90,
+            vjust = 0.3,
+            hjust = 0,
+            lineheight = 0.8)+
+  #geom_brace(aes(c(0.8, 1.2), c(-100, -80)), inherit.data = F, rotate = 180) +
+  #geom_brace(aes(c(1.8, 2.2), c(-100, -80)), inherit.data = F, rotate = 180) +
+  annotate("text", x = 0.8, y = 800, 
+           label = "Clark (2023) estimation;\nsusceptible to pseudo-replication", 
+           hjust = 0, color = "#d8b365", size = 6) +
+  annotate("text", x = 0.8, y = 80, 
+           label = "Estimation corrected for\npseudo-replication", 
+           hjust = 0, color = "#5ab4ac", size = 6) +
+  theme_clark()+
+  scale_x_continuous(breaks = 1:9) +
+  scale_y_continuous(limits=c(0, 1000)) +
+  xlab("Degree of relatedness (n)")+
+  ylab("Sample variance")
 
+plot_grid(s8_cov, s8_var, nrow = 2, labels = c("(a)", "(b)"))
 
-plot_grid(fig_s8a, fig_s8b, nrow = 2, labels = c("(a)", "(b)"), label_y = c(0.8, 1), label_size = 18, rel_heights = c(1, 0.8))
-
-ggsave("fig_s8.png", width = 7, height = 10, units = "in")
-
+ggsave("fig_s8.png", width = 8, height = 12, units = "in")
 ```
+
+
 
 # Fig S9
 
+Empirical distributions of occupational status scores vary with genealogical distance and are distorted by pseudoreplication. 
+
 ```{r}
+
+# add wealth data
 rel_corrs <- rels_occ %>%
   left_join(wealth_long  %>% dplyr::select(pid, lwealth), by = join_by(pid0 == pid)) %>%
   left_join(wealth_long  %>% dplyr::select(pid, lwealth), by = join_by(pid1 == pid), suffix = c("_0", "_1")) %>%
   {.}
 
+# get df for unique individuals
 occ_dist_raw <- bind_rows(rel_corrs %>%
                             dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
                             dplyr::select(relationship, pid=pid0, occ=occ0, wealth=lwealth_0, byr=byr0),
@@ -2549,6 +2682,7 @@ occ_dist_raw <- bind_rows(rel_corrs %>%
   slice_sample(n=1) %>%
   mutate(group="Unique individuals")
 
+# get df for all pairs included in dataset
 occ_dist_pr <- bind_rows(rel_corrs %>%
                            dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
                            dplyr::select(relationship, pid=pid0, occ=occ0, wealth=lwealth_0, byr=byr0),
@@ -2603,6 +2737,8 @@ ggsave("fig_s9.png", width = 10, height = 5, units = "in")
 
 # Fig S10
 
+Mean and variance of birth year and status measures across genealogical distance.
+
 ```{r}
 
 # add wealth data to the relative correlations df
@@ -2613,6 +2749,7 @@ rel_corrs <- rels_occ %>%
   {.}
 
 
+# calculate mean and variance of occStat, birth year, and wealth across relationship classes
 occstat_confounders <- bind_rows(rel_corrs %>%
                                    dplyr::filter(per1780==1 & !is.na(occ0) & !is.na(occ1) & relationship!="random") %>% 
                                    dplyr::select(relationship, pid=pid0, occ=occ0, wealth=lwealth_0, byr=byr0),
@@ -2632,6 +2769,7 @@ occstat_confounders <- bind_rows(rel_corrs %>%
             var_wealth=var(wealth, na.rm=T))
 
 
+# plot
 fig_s10 <- occstat_confounders %>% 
   merge(relations.df, by.x="relationship", by.y="relationship_rels_occ") %>%
   mutate(relationship_rename = fct_relevel(relationship_rename, relationship_rename_vec)) %>%
@@ -2668,7 +2806,9 @@ ggsave("fig_S10.png", width = 8, height = 8, units = "in")
 
 ```
 
-# Fig S11 - Insensitivity of b to magnitude of correlations
+# Fig S11 
+
+Illustrate how the persistence parameter b is insensitive to the magnitude of familial correlations and describes only the rate at which they change as relatedness decreases.
 
 ```{r}
 
@@ -2692,14 +2832,14 @@ occ_stat.df <- relations.df %>%
   mutate(relationship = tolower(relationship)) %>%
   # fix some mixed labeling
   left_join(rels_occ.df1 %>% mutate(relationship = ifelse(relationship == "father-son", "child", ifelse(relationship == "grandson", "grandchild", ifelse(relationship == "sons", "full sibling", ifelse(relationship == "siblings-rem", "sibling-rem", relationship)))))) %>%
-  mutate(cor_90 = cor * 0.1)
+  mutate(cor_90 = cor * 0.1) # hypothetical 90% decline in correlation
 
 
 
 ####
 ## illustrate 90% decline in cors
 ####
-sens_b_a.gg <- occ_stat.df %>%
+occ_stat.df %>%
   mutate(n = ifelse(relationship == "child", 1, ifelse(relationship == "grandchild", 2, n))) %>%
 ggplot() +
   geom_point(aes(x = as.factor(n), y = cor), color = "#66C2A5", size = 3) +
@@ -2720,15 +2860,9 @@ ggsave("fig_s11.png", width = 7.5, height = 5, units = "in")
 
 
 
+# Fig S12
 
-
-
-
-
-
-
-
-# Fig S12 - Simulation
+Simulate sensitivity of the persistence parameter, b, to changes in relative correlations. 
 
 ```{r}
 set.seed(124) # for reproducibility
@@ -2863,195 +2997,3 @@ plot_grid(plot_grid(sims.gg, b.gg, nrow = 1, labels = c("(a)", "(b)"), rel_width
 ggsave("fig_s12.png", width = 10, height = 10, units = "in")
 
 ```
-
-#  simulate mat pat
-
-```{r simulate normal}
-set.seed(123)  # For reproducibility
-
-k <- 3000  # Number of simulations
-results <- vector("list", k)  # To store results
-
-for (i in 1:k) {
-  n <- 400  # Sample size
-#  n <- sample(10:1000, 1)  # Sample size
-  c <- runif(1, 0, 1)  # Correlation between x and z
-  d <- runif(1, -0.4, 0.4) # true coefficient difference
-  
-  # Generate correlated x and z
-  Sigma <- matrix(c(1, c, c, 1), nrow = 2)  # Covariance matrix
-  chol_decomp <- chol(Sigma)
-  norm_matrix <- matrix(rnorm(n*2, mean = 45, sd = 22), ncol = 2)
-  correlated_data <- norm_matrix %*% chol_decomp
-  
-  x <- correlated_data[, 1]
-  z <- correlated_data[, 2]
-  
-  # Generate y based on the model
-  epsilon <- rnorm(n, mean = 0, sd = 15)
-  y <- 15 + 0.33*x + (0.33-d)*z + epsilon  # Assuming beta_0=1, beta_1=2, beta_2=3
-  
-  # Fit linear model
-  fit <- lm(y ~ x + z)
-  
-  # Extract coefficients and confidence intervals
-  coef_est <- coef(fit)
-  ci <- confint(fit, level = 0.95)
-  
-  # Store results, including c
-  results[[i]] <- tibble(
-    run = i,
-    c = c,
-    n = n,
-    d = d,
-    beta_x = coef_est["x"],
-    beta_z = coef_est["z"],
-    ci_lower_x = ci["x", 1],
-    ci_upper_x = ci["x", 2],
-    ci_lower_z = ci["z", 1],
-    ci_upper_z = ci["z", 2]
-  )
-}
-
-# Combine all results into one tidy dataframe
-final_results <- bind_rows(results)
-
-final_results <- final_results %>%
-  mutate(overlap = (ci_lower_x < ci_upper_z & ci_upper_x > ci_lower_z) | 
-                   (ci_lower_z < ci_upper_x & ci_upper_z > ci_lower_x))
-
-final_results %>%
-  group_by(overlap) %>%
-  tally()
-
-final_results %>%
-  mutate(x_ci = ci_upper_x - ci_lower_x,
-         z_ci = ci_upper_z - ci_lower_z) %>%
-  group_by(n) %>%
-  summarise(x_ci_mean = mean(x_ci))
-  ggplot(aes(x = x_ci)) +
-  geom_histogram()
-
-```
-
-```{r plot}
-ggplot(final_results, aes(x = c, y = d, color = overlap)) +
-  geom_point(alpha = 0.6) +
-  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "blue")) +
-  geom_vline(aes(xintercept = 0.72), linetype = 2, linewidth = 1.5) +
-  labs(title = "How different do mat/pat effects need to be to show 'significant' differences",
-       x = "AM correlation in trait",
-       y = "True coefficient / effect difference (d)",
-       color = "CIs Overlap") +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-
-```
-
-```{r permutation test}
-set.seed(123)  # For reproducibility
-n_permutations <- 1000  # Number of permutations
-original_model <- lm(occgc ~ occpgf + occmgf, data = wealth)
-original_statistic <- coef(original_model)  # Or any other statistic of interest
-
-permutation_stats <- replicate(n_permutations, {
-  # Permute the occpgf and occmgf while maintaining their correlation
-  # This is a simple way to do it, which might not maintain the exact correlation
-  permuted_occpgf <- sample(wealth$occpgf)
-  permuted_occmgf <- sample(wealth$occmgf)
-
-  # Fit the model to the permuted data
-  permuted_model <- lm(occgc ~ permuted_occpgf + permuted_occmgf, data = wealth)
-
-  # Extract the test statistic from the permuted model
-  coef(permuted_model)  # Or any other statistic of interest
-})
-
-# Calculate p-values
-p_values <- sapply(original_statistic, function(orig_stat, perm_stats) {
-  mean(abs(perm_stats) >= abs(orig_stat))
-}, perm_stats = permutation_stats)
-
-hist(p_values)  # The p-values for each coefficient
-
-```
-
-
-```{r simulate ber}
-set.seed(123)  # For reproducibility
-
-k <- 2000  # Number of simulations
-n <- 5000  # Sample size fixed at 5000
-results <- vector("list", k)  # To store results
-
-for (i in 1:k) {
-  c <- runif(1, 0, 1)  # Correlation between x and z, for information
-  d <- runif(1, 0, 0.3) # True coefficient difference
-  
-  # Generate binary x and z using a Bernoulli distribution (p=0.5 for simplicity)
-  x <- rbinom(n, 1, 0.1)
-#  z <- rbinom(n, 1, 0.1)
-  
-  # Generate z where the probability z = x is c
-  z <- ifelse(runif(n) < c, x, ifelse(x == 0, 1, 0))  # Generate z
-  corr = cor(x, z)
-  
-  # Generate y based on the model with binary predictors
-  epsilon <- rnorm(n, mean = 0, sd = 0.25)  # Error term
-  y <- 15 + 0.33*x + (0.33-d)*z + epsilon  # Linear combination plus error
-  
-  # Convert y to binary for the sake of alignment with the question, but commented out to follow instructions
-  # y <- ifelse(y > median(y), 1, 0)
-  
-  # Fit linear model
-  fit <- lm(y ~ x + z)
-  
-  # Extract coefficients and confidence intervals
-  coef_est <- coef(fit)
-  ci <- confint(fit, level = 0.95)
-  
-  # Store results, including c
-  results[[i]] <- tibble(
-    run = i,
-    c = c,
-    n = n,
-    d = d,
-    corr = corr,
-    beta_x = coef_est["x"],
-    beta_z = coef_est["z"],
-    ci_lower_x = ci["x", 1],
-    ci_upper_x = ci["x", 2],
-    ci_lower_z = ci["z", 1],
-    ci_upper_z = ci["z", 2]
-  )
-}
-
-# Combine all results into one tidy dataframe
-final_results_ber <- bind_rows(results)
-
-final_results_ber <- final_results_ber %>%
-  mutate(overlap = (ci_lower_x < ci_upper_z & ci_upper_x > ci_lower_z) | 
-                   (ci_lower_z < ci_upper_x & ci_upper_z > ci_lower_x))
-
-final_results_ber %>%
-  filter(corr > 0) %>%
-ggplot(aes(x = corr, y = d, color = overlap)) +
-  geom_point(alpha = 0.6) +
-  scale_color_manual(values = c("TRUE" = "red", "FALSE" = "blue")) +
-  geom_vline(aes(xintercept = 0.5), linetype = 2, linewidth = 1.5) +
-  labs(title = "Relationship Between Correlation Coefficient, Sample Size, and CI Overlap",
-       x = "Correlation Coefficient (c)",
-       y = "True coefficient difference (d)",
-       color = "CI Overlap") +
-  theme_minimal()
-
-ggplot(final_results_ber, aes(x = c, y = corr)) +
-  geom_point()
-
-```
-
-
-
-
-
-
