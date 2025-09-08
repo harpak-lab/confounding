@@ -71,19 +71,42 @@ This table lists the variables referenced in `Clark2023.Rmd` and used from the C
 
 ### Song and Zhang 2024 analyses
 
-All data come from the archived datasets accompanying,
+The file `SZ2024.R` contains code for our reanalysis of 
 
 > Song, S., and J. Zhang. 2024. Genetic variants underlying human bisexual behavior are reproductively advantageous. Sci. Adv. 10:eadj6958.
 
-Data can be found here: <https://datadryad.org/dataset/doi:10.5061/dryad.4b8gthtk9>. These datasets are licensed as CC-BY-NC.
+Datasets containing GWAS summary statistics used in this analysis are available via Zenodo at https://doi.org/10.5281/zenodo.16994853.
 
 #### Variable dictionary
 
-This table lists the variables referenced in `SZ2024.R`, along with descriptions and units/scales as they are used in the analysis. See Song and Zhang (2024) for more details on construction of variables.
+This table lists the measures analyzed in `SZ2024.R`, which were derived from phenotype information in the UK Biobank. See Song and Zhang (2024) for more details on construction of the sexual behavior variables.
 
-| Variable | Description       | Units / Scale | Notes |
+| Measure | Description       | Type | Notes |
 |----------|-------------------|---------------|-------|
-| `pid`    | Person identifier | ID (integer)  |       |
+| `NC`    | Number of children | Quantitative  |       |
+| `afs10`    | First had sex before age 10 | Binary  |       |
+| `afs13`    | First had sex before age 13 | Binary  |       |
+| `bsb`    | "bisexual behavior" as defined in Song & Zhang 2024 | Binary  |       |
+| `essb`    | "exclusively same-sex sexual behavior" as defined in Song & Zhang 2024 | Binary  |       |
+| `Ever_smoked`    |  | Binary  |       |
+| `Ever_taken_cannabis`    | | Binary  |       |
+| `Maternal_smoking_around_birth`    | | Binary  |       |
+| `osb_any`    | "engaged in any opposite-sex sexual behavior" as defined in Song & Zhang 2024 | Binary  |       |
+| `Physically_abused_by_family_as_a_child`    |  | Binary  |       |
+| `Recent_poor_appetite_or_overeating`    |  | Binary  |       |
+| `risk_taking`    |  | Binary  |       |
+| `ssb`    | "any same-sex sexual behavior" as defined in Song & Zhang 2024 | Binary  |       |
+| `Victim_of_sexual_assault`    |  | Binary  |       |
+| `Age_first_had_sexual_intercourse`    |  | Quantitative  |       |
+| `Average_total_household_income_before_tax`    |  | Quantitative  |       |
+| `Falls_in_the_last_year`    |  | Quantitative  |       |
+| `Frequency_of_solariumsunlamp_use`    |  | Quantitative  |       |
+| `Length_of_working_week_for_main_job`    |  | Quantitative  |       |
+| `Lifetime_number_of_sexual_partners`    |  | Quantitative  |       |
+| `Loud_music_exposure_frequency`    |  | Quantitative  |       |
+| `Number_of_full_brothers`    |  | Quantitative  |       |
+| `Number_of_full_sisters`    |  | Quantitative  |       |
+| `Weekly_usage_of_mobile_phone_in_last_3_months`    |  | Quantitative  |       |
 
 ## Citing this code
 
