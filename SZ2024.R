@@ -1,128 +1,100 @@
+##########################
 # Install GenomicSEM package first. Follow instructions in https://github.com/GenomicSEM/GenomicSEM
+##########################
 
 require(GenomicSEM)
 
-datadir <- "sumstats/"
-set <- "sz_rep" # replicate SZ's results
+# GenomicSEM functions used in this script requires two additional downloads:
+# - a file of SNPs with A1, A2 and rsID used to allign alleles across trait (typically from HapMap3)
+# - an (unzipped) folder containing pre-computed LD scores & weights:
+# See https://github.com/GenomicSEM/GenomicSEM for instructions on where/how to download these files
 
-# get # children (both sexes) sumstat file
-sz_nc <- paste0(datadir, set, "/ukb_wb.quant.both_n_children.regenie")
-sz_nc_new <- gsub(".regenie", "_p.regenie", sz_nc)
-ss <- read_delim(sz_nc, delim=" ") %>% mutate(P=10^(-LOG10P))
-write_tsv(ss, sz_nc_new)
-
-# list all male sumstat files
-regenie_results_all <- list.files(paste0(datadir, set), pattern="*[.]male*", full.names=T)
-
-# get sumstat files with transformed P-vals
-regenie_results <- regenie_results_all[!grepl("_p.regenie", regenie_results_all)]
-
-# check if sumstat files with transformed P-vals exist, otherwise create them
-for (i in 1:length(regenie_results)){
-  outfile <- gsub(".regenie", "_p.regenie", regenie_results[i])
-  if (!file.exists(outfile)){
-    print(regenie_results[i])
-    ss <- read_delim(regenie_results[i], delim=" ") %>% mutate(P=10^(-LOG10P))
-    write_tsv(ss, outfile)
-  }
-}
-
-regenie_results_new <- gsub(".regenie", "_p.regenie", regenie_results)
-
-
-# specify sumstat files and trait names
-trait_files_new <- c(sz_nc_new, regenie_results_new)
-
-trait.names<-c("NC", gsub(".*.male[_,.]", "", gsub("_p.regenie", "", basename(regenie_results_new))))
-
-##########################
-# Munge GWAS summary statistics first
-##########################
+# specify the HapMap3 SNP list file:
 hm3 <- "w_hm3.snplist"
 
-# doing by batch to avoid hitting memory limits
-munge(files=trait_files_new[1:10],hm3=hm3,trait.names=trait.names[1:10])
-munge(files=trait_files_new[11:20],hm3=hm3,trait.names=trait.names[11:20])
-munge(files=trait_files_new[21:31],hm3=hm3,trait.names=trait.names[21:31])
-
-# get prevalences for binary traits
-binary_prevs <- phenos_new %>%
-  dplyr::filter(genetic_sex==1) %>%
-  dplyr::filter(FID %in% keep_ids$eid) %>%
-  mutate(Recent_poor_appetite_or_overeating=ifelse(Recent_poor_appetite_or_overeating <0, NA,
-                                                   ifelse(Recent_poor_appetite_or_overeating ==1, 0, 1)),
-         Maternal_smoking_around_birth =ifelse(Maternal_smoking_around_birth  <0, NA, Maternal_smoking_around_birth  ),
-         Ever_taken_cannabis =ifelse(Ever_taken_cannabis  <0, NA,
-                                     ifelse(Ever_taken_cannabis ==0, 0, 1)),
-         afs10   =ifelse(Age_first_had_sexual_intercourse  < 0, NA,
-                         ifelse(Age_first_had_sexual_intercourse < 10, 1, 0)),
-         afs13   =ifelse(Age_first_had_sexual_intercourse  < 0, NA,
-                         ifelse(Age_first_had_sexual_intercourse < 13, 1, 0)),
-         Physically_abused_by_family_as_a_child  =ifelse(Physically_abused_by_family_as_a_child   <0, NA,
-                                                         ifelse(Physically_abused_by_family_as_a_child  ==0, 0, 1)),
-         Victim_of_sexual_assault    =ifelse(Victim_of_sexual_assault    <0, NA,
-                                             ifelse(Victim_of_sexual_assault   ==0, 0, 1))) %>%
-  dplyr::select(FID, IID,
-                Recent_poor_appetite_or_overeating, Maternal_smoking_around_birth, Ever_smoked, Ever_taken_cannabis,
-                Physically_abused_by_family_as_a_child, Victim_of_sexual_assault, afs10) %>%
-  mutate(eid=FID) %>%
-  left_join(phen2, by="eid") %>%
-  mutate(risk_taking    =ifelse(risk_taking    <0, NA,
-                                ifelse(risk_taking   ==0, 0, 1))) %>%
-  # dplyr::rename(eid=FID) %>%
-  dplyr::select(FID, IID, risk_taking, ssb=ssb2, bsb, essb,
-                Recent_poor_appetite_or_overeating, Maternal_smoking_around_birth, Ever_smoked, Ever_taken_cannabis,
-                Physically_abused_by_family_as_a_child, Victim_of_sexual_assault, afs10, afs13) %>% 
-  summarise(across(1:afs10, ~ base::mean(.x,  na.rm=T))) %>% 
-  dplyr::select(-c(FID, IID)) %>% 
-  pivot_longer(cols=risk_taking:afs10) %>% 
-  arrange(tolower(name))
-
-sample.prev<-c(NA, binary_prevs$value, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA)
-population.prev<-sample.prev
-
-# the folder of LD scores
+# specify the directory containing LD scores:
 ld <- "eur_w_ld_chr/"
 
-# the folder of LD weights [typically the same as folder of LD scores]
+# specify the directory containing LD weights [typically the same as folder of LD scores]:
 wld <- "eur_w_ld_chr/"
 
+##########################
+# Get file names for GWAS summary statistics used in this analysis
+# these files are available via Zenodo
+##########################
+# GWAS sumstat file for # children (both sexes) 
+sz_nc <- "ukb_wb.quant.both_n_children_p.regenie"
+
+# get list of all male sumstat files
+regenie_results_male <- list.files(".", pattern="*[.]male.*_p.regenie", full.names=T)
+
+# combine the above into a single list of files (order is important)
+trait_files <- c(sz_nc, regenie_results_male)
+
+# specify the trait names based on the file names of the above sumstat files
+trait.names<-c("NC", gsub(".*.male[_,.]", "", gsub("_p.regenie", "", basename(regenie_results_male))))
+
+##########################
+# Munge GWAS summary statistics
+##########################
+munge(files=trait_files, hm3=hm3, trait.names)
+
+# munged files will be created in the same directory as the initial sumstat files with the format
+# "trait.sumstats.gz"--we need a list of these files for using the LDSC function below
 munged_files <- paste0(trait.names, ".sumstats.gz")
 
-# run LDSC
-LDSCoutput <- ldsc(traits=munged_files,sample.prev=sample.prev,population.prev=population.prev,
-                   ld=ld,wld=wld,trait.names=trait.names)
+# prevalences of binary traits to be analyzed were calculated from raw UKB phenotype data 
+#    name                                     value
+#  1 afs10                                  0.00173
+#  2 afs13                                  0.0128 
+#  3 bsb                                    0.0199 
+#  4 essb                                   0.0103 
+#  5 Ever_smoked                            0.653  
+#  6 Ever_taken_cannabis                    0.255  
+#  7 Maternal_smoking_around_birth          0.302  
+#  8 Physically_abused_by_family_as_a_child 0.212  
+#  9 Recent_poor_appetite_or_overeating     0.137  
+# 10 risk_taking                            0.350  
+# 11 ssb                                    0.0430 
+# 12 Victim_of_sexual_assault               0.0764 
 
-# Run SZ's model with reversed paths for Fig S14
-MODEL0 <- 'NC ~ bsb+risk_taking
-          bsb ~ risk_taking'
+# add these sample prevalences to a list for the traits analyzed (order is important; must align with the order of measures
+# as they appear in `trait.names`
+
+sample.prev <- c(NA, 0.00173, 0.0128, 0.0199, 0.0103, 0.653, 0.255, 0.302, 0.212, 0.137, 0.350, 0.043, 0.0764, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA, NA)
+
+population.prev <- sample.prev
+
+##########################
+# run LDSC
+##########################
+LDSCoutput <- ldsc(traits=munged_files, 
+                   sample.prev=sample.prev,
+                   population.prev=population.prev,
+                   ld=ld,
+                   wld=wld,
+                   trait.names=trait.names)
+
+##########################
+# Fit GenomicSEM models
+##########################
+
+# Song & Zhang's postulated model
+MODEL0 <- 'NC ~ risk_taking + bsb
+          risk_taking ~ bsb'
 
 result <- usermodel(LDSCoutput, estimation = "DWLS", model = MODEL0,  std.lv = TRUE, imp_cov = TRUE)
 result$results
 
-
-MODEL1 <- 'NC ~ risk_taking + bsb
-          risk_taking ~ bsb'
+# Run Song & Zhang's model with reversed paths for Fig S14
+MODEL1 <- 'NC ~ bsb+risk_taking
+          bsb ~ risk_taking'
 
 result <- usermodel(LDSCoutput, estimation = "DWLS", model = MODEL1,  std.lv = TRUE, imp_cov = TRUE)
 result$results
 
 
-MODEL2 <- 'bsb ~ NC
-          risk_taking ~ bsb+NC'
-
-result <- usermodel(LDSCoutput, estimation = "DWLS", model = MODEL2,  std.lv = TRUE, imp_cov = TRUE)
-result$results
-
-
-MODEL3 <- 'NC ~ bsb+risk_taking
-          bsb ~~ risk_taking'
-
-result <- usermodel(LDSCoutput, estimation = "DWLS", model = MODEL3,  std.lv = TRUE, imp_cov = TRUE)
-result$results
-
-
-# Run alt models replacing risk-taking with other measures
+# Run alternative models where we replace risk-taking in Song & Zhang's postulated model with each of the other measures considered
 results_all_b <- data.frame()
 for (i in c(2:3,5:31)){
   MODEL <- paste0("NC ~ ", trait.names[i], "+bsb
@@ -135,6 +107,7 @@ for (i in c(2:3,5:31)){
   
 }
 
+# assign trait name to table of results
 results_all_b$trait <- rep(trait.names[c(2:3,5:31)], each=6)
  
 # Measure X x BSB (Fig S15)
@@ -206,7 +179,6 @@ tnc2 <- trait_nc2 %>%
          ci_upper=STD_Genotype+1.96*STD_Genotype_SE) %>%
   # mutate(highlight=ifelse(grepl("risk taking", trait), "a", ifelse(grepl("[*]", trait), "c", "b"))) %>%
   mutate(highlight=ifelse(grepl("Risk-taking behavior", trait), "a", "b")) %>%
-  
   ggplot(aes(x=STD_Genotype, y=reorder(trait, STD_Genotype), colour=highlight))+
   geom_vline(xintercept=0, linetype="dashed", colour="grey60")+
   geom_point()+
@@ -250,19 +222,15 @@ bnc2 <- fig3b_data %>%
   mutate(trait=ifelse(p_value<0.05, paste0(trait, "*"), trait)) %>%
   mutate(ci_lower=STD_Genotype-1.96*STD_Genotype_SE, 
          ci_upper=STD_Genotype+1.96*STD_Genotype_SE) %>%
-  # mutate(highlight=ifelse(grepl("risk taking", trait), "a", ifelse(grepl("[*]", trait), "c", "b"))) %>%
   mutate(highlight=ifelse(grepl("Risk-taking behavior", trait), "a", "b")) %>%
   ggplot(aes(x=STD_Genotype, y=reorder(trait, STD_Genotype), colour=highlight))+
   geom_vline(xintercept=0, linetype="dashed", colour="grey60")+
   geom_point()+
   scale_colour_manual(values=c("#008a9c", "blue"))+
   geom_text(aes(label=trait), nudge_y=0.4, size=5)+
-  # geom_errorbar(aes(xmax=STD_Genotype+STD_Genotype_SE, xmin=STD_Genotype-STD_Genotype_SE), width=0.25)+
   geom_errorbar(aes(xmax=ci_upper, xmin=ci_lower), width=0.25)+
-  # scale_x_continuous(breaks=round(seq(-0.3, 0.4, by=0.1), digits=2), limits=c(-0.31,0.29))+
   scale_y_discrete(expand=c(0.01, 0))+
   xlab("Partial genetic correlation \n between BSB in males and number of children")+
-  # ylab(NULL)+
   ylab("Measure X \n (measure for which genetic correlations are being adjusted)")+
   coord_cartesian(clip = 'off') +
   theme_classic()+
@@ -274,21 +242,10 @@ bnc2 <- fig3b_data %>%
         legend.position="none")
 
 # Fig 3c
-fig3c_data <- phenos_all %>% 
-  dplyr::filter(genetic_sex==1 & IID %in% keep_ids$eid & !is.na(bsb) & !is.na(Age_first_had_sexual_intercourse)) %>% 
-  mutate(Age_first_had_sexual_intercourse=ifelse(Age_first_had_sexual_intercourse<10, "<10",
-                                                 ifelse(Age_first_had_sexual_intercourse<13, "10-12",
-                                                        ifelse(Age_first_had_sexual_intercourse<16, "13-15",
-                                                               ifelse(Age_first_had_sexual_intercourse<21, "16-20",
-                                                                      ifelse(Age_first_had_sexual_intercourse<30, "21-29",
-                                                                             ifelse(Age_first_had_sexual_intercourse<40, "30-39",
-                                                                                    ifelse(Age_first_had_sexual_intercourse<50, "40-49", "50+")))))))) %>%
-  group_by(Age_first_had_sexual_intercourse, bsb) %>% 
-  count %>% 
-  group_by(Age_first_had_sexual_intercourse) %>% 
-  mutate(ntot=sum(n), prop=n/ntot) %>% 
-  dplyr::filter(bsb==1) %>% 
-  mutate(Age_first_had_sexual_intercourse=as.factor(Age_first_had_sexual_intercourse))
+# note that this figure is generated using individual phenotype data from UK Biobank.
+# Summary data for replicating this figure is provided in the file fig3c_data.tsv
+
+fig3c_data <- read_tsv("fig3c_data.tsv")
 
 fig3c <- fig3c_data %>% 
   ggplot(aes(x=forcats::fct_rev(Age_first_had_sexual_intercourse), y=prop))+
